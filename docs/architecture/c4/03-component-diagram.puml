@@ -1,0 +1,57 @@
+@startuml zotero2ai_components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Component Diagram - zotero2ai MCP Server
+
+Person(user, "AI Agent", "Claude, GPT, etc.")
+
+Container_Boundary(mcp_server, "zotero2ai MCP Server") {
+    Component(server, "MCP Server", "FastMCP", "Exposes tools and resources via MCP protocol")
+    Component(schemas, "Tool Schemas", "Pydantic", "Input/output validation for MCP tools")
+    
+    Container_Boundary(zotero_boundary, "Zotero Module") {
+        Component(db, "DB Reader", "sqlite3", "Read-only SQLite access to zotero.sqlite")
+        Component(models, "Data Models", "dataclasses", "Item, Note, Collection, Tag")
+        Component(collections, "Collection Resolver", "Python", "Builds collection hierarchy and paths")
+        Component(items, "Item Reader", "Python", "Fetches items with notes, tags, relations")
+        Component(text, "Text Assembly", "Python", "Prepares text for indexing")
+    }
+    
+    Container_Boundary(index_boundary, "Index Module") {
+        Component(embedder, "Embedder", "sentence-transformers", "Generates vector embeddings")
+        Component(store, "Vector Store", "FAISS", "Persists and searches embeddings")
+        Component(pipeline, "Index Pipeline", "Python", "Incremental indexing with content hashing")
+        Component(hybrid, "Hybrid Search", "Python", "Combines lexical + vector scores")
+    }
+    
+    Component(config, "Config", "platformdirs", "Resolves ZOTERO_DATA_DIR and cache paths")
+}
+
+System_Ext(zotero_db, "Zotero Database", "zotero.sqlite (read-only)")
+System_Ext(cache, "Local Cache", "~/.cache/zotero2ai/")
+
+Rel(user, server, "Uses", "MCP protocol")
+Rel(server, schemas, "Validates with")
+Rel(server, collections, "list_collections, set_active")
+Rel(server, items, "get_item")
+Rel(server, hybrid, "search")
+Rel(server, pipeline, "index_update, index_status")
+
+Rel(db, zotero_db, "Reads", "SQLite read-only")
+Rel(collections, db, "Queries")
+Rel(items, db, "Queries")
+Rel(text, items, "Uses")
+
+Rel(pipeline, text, "Gets indexable text")
+Rel(pipeline, embedder, "Generates embeddings")
+Rel(pipeline, store, "Persists to")
+Rel(store, cache, "Stores index.faiss, meta.sqlite")
+
+Rel(hybrid, db, "Lexical search")
+Rel(hybrid, store, "Vector search")
+
+Rel_Back(config, server, "Provides paths")
+
+@enduml

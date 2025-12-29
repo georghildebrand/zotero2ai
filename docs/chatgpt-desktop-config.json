@@ -1,0 +1,17 @@
+{
+    "mcpServers": {
+        "zotero2ai": {
+            "command": "uv",
+            "args": [
+                "run",
+                "--directory",
+                "/Users/georg.hildebrand/workspace/github.com/zotero2ai",
+                "mcp-zotero2ai",
+                "run"
+            ],
+            "env": {
+                "ZOTERO_DATA_DIR": "/Users/georg.hildebrand/Zotero"
+            }
+        }
+    }
+}

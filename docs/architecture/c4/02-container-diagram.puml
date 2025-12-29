@@ -1,0 +1,31 @@
+@startuml C4_Level2_zotero2ai
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Container Diagram - Zotero2ai Internal Architecture
+
+Person(user, "Researcher", "User of the AI client")
+
+System_Boundary(zotero2ai_system, "Zotero2ai") {
+    Container(cli, "CLI Module", "Python argparse", "Handles 'doctor' and 'run' commands, path resolution")
+    Container(mcp, "MCP Server Module", "FastMCP", "Exposes tools (search, get_item) and resources")
+    
+    Container(zotero_mod, "Zotero Module", "Python / SQLite", "Read-only access to Zotero SQLite database and models")
+    Container(index_mod, "Index Module", "FAISS / sentence-transformers", "Vector search, hybrid indexing, and embeddings")
+    
+    Container(config_mod, "Config & Logging", "Python stdlib", "Handles ZOTERO_DATA_DIR discovery and logging setup")
+}
+
+System_Ext(ai_client, "AI Client", "Claude Desktop, Windsurf, or other MCP hosts")
+System_Ext(zotero_sqlite, "Zotero SQLite", "The local zotero.sqlite file")
+System_Ext(cache_dir, "Cache Directory", "Storage for FAISS index and metadata (~/.cache/zotero2ai)")
+
+Rel(ai_client, mcp, "Interacts via MCP", "stdio")
+Rel(cli, mcp, "Starts server", "Function call")
+Rel(mcp, zotero_mod, "Fetches items/collections", "Function call")
+Rel(mcp, index_mod, "Performs search", "Function call")
+Rel(index_mod, zotero_mod, "Reads items to index", "Function call")
+Rel(zotero_mod, zotero_sqlite, "Read-only queries", "SQL")
+Rel(index_mod, cache_dir, "Persists FAISS index", "File I/O")
+Rel(cli, config_mod, "Resolves Zotero path", "Function call")
+
+@enduml

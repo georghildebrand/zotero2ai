@@ -1,0 +1,23 @@
+@startuml DevWorkflow
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Development Workflow - Zotero2ai Project
+
+Person(dev, "Developer", "Contributor to zotero2ai")
+
+System_Boundary(local_dev, "Local Development Environment") {
+    System(make, "Makefile", "Orchestrates development tasks")
+    System(pytest, "Pytest", "Runs unit and integration tests")
+    System(ruff, "Ruff", "Performs formatting and linting")
+    System(mypy, "Mypy", "Checks static types")
+    System(uv, "uv", "Package and dependency management")
+}
+
+Rel(dev, make, "Executes", "make <target>")
+Rel(make, uv, "Installs dependencies", "make install")
+Rel(make, pytest, "Runs test suite", "make test")
+Rel(make, ruff, "Ensures code style", "make lint / make format")
+Rel(make, mypy, "Verifies type safety", "make lint")
+Rel(make, uv, "Runs application", "make run / make doctor")
+
+@enduml

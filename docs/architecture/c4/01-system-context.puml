@@ -1,0 +1,25 @@
+@startuml C4_Level1_zotero2ai
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title System Context Diagram - Zotero2ai MCP Server
+
+Person(user, "User / Researcher", "Scientist using AI to analyze and query their Zotero library")
+
+System_Boundary(zotero2ai_boundary, "Zotero2ai System") {
+    System(zotero2ai_app, "Zotero2ai MCP Server", "Python application providing Zotero data via MCP and local vector search")
+}
+
+System_Ext(zotero_db, "Zotero Database", "Local zotero.sqlite (read-only access)")
+System_Ext(zotero_storage, "Zotero Storage", "Local PDF attachments and notes")
+System_Ext(ai_client, "AI Client (e.g. Claude Desktop)", "Host for the MCP server, provides the chat interface")
+System_Ext(local_fs, "Local File System", "Cache for Vector Index (~/.cache/zotero2ai)")
+
+Rel(user, ai_client, "Interacts with AI", "Natural Language")
+Rel(ai_client, zotero2ai_app, "Sends MCP requests (Tools/Resources)", "JSON-RPC via stdio")
+Rel(zotero2ai_app, zotero_db, "Reads items, collections, tags", "SQLite (mode=ro)")
+Rel(zotero2ai_app, zotero_storage, "Reads attachment content (future)", "File I/O")
+Rel(zotero2ai_app, local_fs, "Persists/Loads vector index", "FAISS / File I/O")
+
+Rel(user, zotero2ai_app, "Configures via ENV/CLI", "ZOTERO_DATA_DIR")
+
+@enduml

@@ -1,0 +1,98 @@
+"""Configuration resolution for zotero2ai.
+
+This module handles the resolution and validation of the Zotero data directory.
+"""
+
+import os
+from pathlib import Path
+
+
+class ZoteroDataDirNotFoundError(FileNotFoundError):
+    """Raised when the Zotero data directory cannot be found or is invalid."""
+
+    pass
+
+
+def resolve_zotero_data_dir() -> Path:
+    """Resolve the Zotero data directory.
+
+    Resolution order:
+    1. ZOTERO_DATA_DIR environment variable
+    2. ~/Zotero
+    3. ~/zotero
+
+    Returns:
+        Path: Absolute path to the validated Zotero data directory.
+
+    Raises:
+        ZoteroDataDirNotFoundError: If no valid Zotero data directory is found.
+    Raises:
+        ZoteroDataDirNotFoundError: If no valid Zotero data directory is found.
+    """
+    # Resolution order
+    candidates: list[Path] = []
+
+    # 1. Check ZOTERO_DATA_DIR environment variable
+    if env_dir := os.getenv("ZOTERO_DATA_DIR"):
+        candidates.append(Path(env_dir).expanduser().resolve())
+
+    # 2. Check ~/Zotero
+    candidates.append(Path.home() / "Zotero")
+
+    # 3. Check ~/zotero
+    candidates.append(Path.home() / "zotero")
+
+    # Try each candidate
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            # Validate the directory
+            try:
+                validate_zotero_data_dir(candidate)
+                return candidate
+            except ZoteroDataDirNotFoundError:
+                # This candidate is invalid, try the next one
+                continue
+
+    # No valid directory found
+    raise ZoteroDataDirNotFoundError(
+        "Could not find a valid Zotero data directory. "
+        "Please ensure that:\n"
+        "  1. Zotero is installed and has been run at least once, OR\n"
+        "  2. Set the ZOTERO_DATA_DIR environment variable to point to your Zotero data directory.\n"
+        "\n"
+        "Searched locations:\n" + "\n".join(f"  - {c}" for c in candidates)
+    )
+
+
+def resolve_zotero_api_key() -> str | None:
+    """Resolve the Zotero API key from the ZOTERO_API_KEY environment variable."""
+    return os.getenv("ZOTERO_API_KEY")
+
+
+def resolve_zotero_user_id() -> str | None:
+    """Resolve the Zotero User ID (Library ID) from the ZOTERO_USER_ID environment variable."""
+    return os.getenv("ZOTERO_USER_ID")
+
+
+def validate_zotero_data_dir(data_dir: Path) -> None:
+    """Validate that a directory is a valid Zotero data directory.
+
+    Args:
+        data_dir: Path to the directory to validate.
+
+    Raises:
+        ZoteroDataDirNotFoundError: If the directory is missing required files/folders.
+    """
+    # Check for zotero.sqlite
+    sqlite_path = data_dir / "zotero.sqlite"
+    if not sqlite_path.exists():
+        raise ZoteroDataDirNotFoundError(
+            f"Invalid Zotero data directory: {data_dir}\nMissing required file: zotero.sqlite\nPlease set ZOTERO_DATA_DIR to a valid Zotero data directory."
+        )
+
+    # Check for storage/ directory
+    storage_path = data_dir / "storage"
+    if not storage_path.exists() or not storage_path.is_dir():
+        raise ZoteroDataDirNotFoundError(
+            f"Invalid Zotero data directory: {data_dir}\nMissing required directory: storage/\nPlease set ZOTERO_DATA_DIR to a valid Zotero data directory."
+        )
