@@ -1800,10 +1800,9 @@ def list_notes(collection_key: str | None = None, parent_item_key: str | None = 
                 modified = datetime.fromisoformat(note["dateModified"].replace("Z", "+00:00"))
 
                 lines.append(
-                    f"{i}. **{friendly_name}**: \"{first_line}\"\n"
+                    f"{i}. **{friendly_name} ({note['key']})**: \"{first_line}\"\n"
                     f"   Created: {created.strftime('%Y-%m-%d')}, "
-                    f"Modified: {modified.strftime('%Y-%m-%d')}\n"
-                    f"   Key: {note['key']}"
+                    f"Modified: {modified.strftime('%Y-%m-%d')}"
                 )
 
             header = f"Found {len(notes)} note(s):\n\n"
@@ -2037,7 +2036,7 @@ def create_or_extend_note(
                     location = f" attached to item '{parent_item_key}'"
 
                 return (
-                    f"Successfully created note **{friendly_name}**{location}.\n" f"Key: {new_key}\n\n" f"First line: {first_line}"
+                    f"Successfully created note **{friendly_name} ({new_key})**{location}.\n\n" f"First line: {first_line}"
                 )
 
     except PluginConnectionError as e:
@@ -2157,6 +2156,457 @@ git commit -m "test(mcp): add integration tests skeleton
 - Add fixtures for mocked plugin responses
 - Add test structure for collections and notes
 - Foundation for comprehensive testing"
+```
+
+---
+
+### Task 5.1b: Add Contract Testing with JSON Schema
+
+**Files:**
+- Create: `plugin/schema/api-responses.json`
+- Modify: `pyproject.toml`
+- Modify: `src/zotero2ai/plugin/client.py`
+- Create: `tests/test_plugin_contract.py`
+
+**Context:** Contract testing ensures the plugin (JavaScript) and MCP server (Python) maintain a stable API contract. Without schema validation, breaking changes only surface at runtime.
+
+**Step 1: Add jsonschema dependency**
+
+Edit `pyproject.toml` dependencies:
+
+```toml
+dependencies = [
+    "platformdirs>=4.0.0",
+    "mcp[cli]>=1.0.0",
+    "pyzotero>=1.5.0",
+    "coolname>=2.2.0",
+    "httpx>=0.27.0",
+    "jsonschema>=4.20.0",
+]
+```
+
+**Step 2: Install dependencies**
+
+```bash
+uv sync
+```
+
+Expected: Dependencies installed successfully
+
+**Step 3: Create JSON schema file**
+
+Create `plugin/schema/api-responses.json`:
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "HealthResponse": {
+      "type": "object",
+      "required": ["status", "zoteroVersion"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok"] },
+        "zoteroVersion": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Collection": {
+      "type": "object",
+      "required": ["key", "name", "fullPath", "libraryID"],
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "parentKey": { "type": ["string", "null"] },
+        "fullPath": { "type": "string" },
+        "libraryID": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "CollectionsResponse": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Collection" }
+    },
+    "Item": {
+      "type": "object",
+      "required": ["key", "itemType", "title", "creators", "date", "tags", "collections"],
+      "properties": {
+        "key": { "type": "string" },
+        "itemType": { "type": "string" },
+        "title": { "type": "string" },
+        "creators": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "date": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "collections": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ItemsResponse": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Item" }
+    },
+    "Note": {
+      "type": "object",
+      "required": ["key", "note", "tags", "collections", "dateAdded", "dateModified"],
+      "properties": {
+        "key": { "type": "string" },
+        "note": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "parentItemKey": { "type": ["string", "null"] },
+        "collections": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dateAdded": { "type": "string", "format": "date-time" },
+        "dateModified": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "NotesResponse": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Note" }
+    },
+    "NoteCreateResponse": {
+      "type": "object",
+      "required": ["key", "success"],
+      "properties": {
+        "key": { "type": "string" },
+        "success": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "NoteUpdateResponse": {
+      "type": "object",
+      "required": ["success"],
+      "properties": {
+        "success": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+**Step 4: Add schema validation to PluginClient**
+
+Edit `src/zotero2ai/plugin/client.py`:
+
+Add imports at top:
+```python
+import json
+from pathlib import Path
+from typing import Any
+
+import httpx
+from jsonschema import validate, ValidationError
+```
+
+Add class-level schema loading:
+```python
+class PluginClient:
+    """HTTP client for communicating with Zotero plugin."""
+
+    # Load schemas once at class level
+    _schema_path = Path(__file__).parent.parent.parent.parent / "plugin" / "schema" / "api-responses.json"
+    _schemas = json.loads(_schema_path.read_text()) if _schema_path.exists() else {"definitions": {}}
+
+    def __init__(self, base_url: str = "http://localhost:23120", timeout: float = 30.0):
+        # ... existing code ...
+```
+
+Add validation method:
+```python
+    def _validate_response(self, data: Any, schema_name: str) -> None:
+        """Validate response against JSON schema.
+
+        Args:
+            data: Response data to validate
+            schema_name: Schema definition name (e.g., "HealthResponse")
+
+        Raises:
+            ValidationError: If response doesn't match schema
+        """
+        if schema_name not in self._schemas.get("definitions", {}):
+            logger.warning(f"No schema found for {schema_name}, skipping validation")
+            return
+
+        schema = {
+            "$ref": f"#/definitions/{schema_name}",
+            "definitions": self._schemas["definitions"]
+        }
+
+        try:
+            validate(instance=data, schema=schema)
+        except ValidationError as e:
+            logger.error(f"Schema validation failed for {schema_name}: {e.message}")
+            raise
+```
+
+Update `_request` method to validate:
+```python
+    def _request(self, method: str, path: str, schema: str | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Make HTTP request to plugin.
+
+        Args:
+            method: HTTP method
+            path: URL path
+            schema: Schema name to validate against (optional)
+            **kwargs: Additional httpx request arguments
+
+        Returns:
+            JSON response as dict
+
+        Raises:
+            PluginConnectionError: If plugin is not reachable
+            ValidationError: If response doesn't match schema
+        """
+        url = f"{self.base_url}{path}"
+
+        try:
+            response = self._client.request(method, url, **kwargs)
+            response.raise_for_status()
+            data = response.json()
+
+            # Validate against schema if provided
+            if schema:
+                self._validate_response(data, schema)
+
+            return data
+
+        except httpx.ConnectError as e:
+            # ... existing error handling ...
+```
+
+Update all method calls to include schema validation:
+```python
+    def health_check(self) -> dict[str, Any]:
+        """Check plugin health status."""
+        return self._request("GET", "/health", schema="HealthResponse")
+
+    def get_collections(self) -> list[dict[str, Any]]:
+        """Get all Zotero collections."""
+        return self._request("GET", "/collections", schema="CollectionsResponse")
+
+    def search_items(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Search items by title."""
+        return self._request("GET", "/items/search", params={"q": query, "limit": limit}, schema="ItemsResponse")
+
+    def get_recent_items(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Get recently added items."""
+        return self._request("GET", "/items/recent", params={"limit": limit}, schema="ItemsResponse")
+
+    def list_notes(self, collection_key: str | None = None, parent_item_key: str | None = None) -> list[dict[str, Any]]:
+        """List notes in collection or attached to item."""
+        params = {}
+        if collection_key:
+            params["collectionKey"] = collection_key
+        if parent_item_key:
+            params["parentItemKey"] = parent_item_key
+
+        return self._request("GET", "/notes", params=params, schema="NotesResponse")
+
+    def create_note(
+        self,
+        note: str,
+        tags: list[str] | None = None,
+        parent_item_key: str | None = None,
+        collections: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new note."""
+        body = {"note": note}
+        if tags:
+            body["tags"] = tags
+        if parent_item_key:
+            body["parentItemKey"] = parent_item_key
+        if collections:
+            body["collections"] = collections
+
+        return self._request("POST", "/notes/create", json=body, schema="NoteCreateResponse")
+
+    def update_note(self, key: str, note: str) -> dict[str, Any]:
+        """Update existing note."""
+        return self._request("PUT", "/notes/update", json={"key": key, "note": note}, schema="NoteUpdateResponse")
+```
+
+**Step 5: Write contract tests**
+
+Create `tests/test_plugin_contract.py`:
+
+```python
+"""Contract tests for plugin API responses."""
+
+import pytest
+from jsonschema import ValidationError
+
+from zotero2ai.plugin.client import PluginClient
+
+
+def test_health_response_valid():
+    """Test valid health response passes validation."""
+    client = PluginClient()
+    valid_response = {"status": "ok", "zoteroVersion": "7.0.0"}
+
+    # Should not raise
+    client._validate_response(valid_response, "HealthResponse")
+
+
+def test_health_response_invalid_missing_field():
+    """Test invalid health response fails validation."""
+    client = PluginClient()
+    invalid_response = {"status": "ok"}  # Missing zoteroVersion
+
+    with pytest.raises(ValidationError):
+        client._validate_response(invalid_response, "HealthResponse")
+
+
+def test_health_response_invalid_extra_field():
+    """Test response with extra fields fails validation."""
+    client = PluginClient()
+    invalid_response = {"status": "ok", "zoteroVersion": "7.0.0", "extra": "field"}
+
+    with pytest.raises(ValidationError):
+        client._validate_response(invalid_response, "HealthResponse")
+
+
+def test_collection_response_valid():
+    """Test valid collection response passes validation."""
+    client = PluginClient()
+    valid_response = [
+        {
+            "key": "ABC123",
+            "name": "Test Collection",
+            "parentKey": None,
+            "fullPath": "Test Collection",
+            "libraryID": 1,
+        }
+    ]
+
+    # Should not raise
+    client._validate_response(valid_response, "CollectionsResponse")
+
+
+def test_note_response_valid():
+    """Test valid note response passes validation."""
+    client = PluginClient()
+    valid_response = [
+        {
+            "key": "NOTE001",
+            "note": "<p>Test note</p>",
+            "tags": ["ai-generated"],
+            "parentItemKey": None,
+            "collections": ["ABC123"],
+            "dateAdded": "2024-12-30T10:00:00Z",
+            "dateModified": "2024-12-30T15:30:00Z",
+        }
+    ]
+
+    # Should not raise
+    client._validate_response(valid_response, "NotesResponse")
+
+
+def test_note_response_invalid_wrong_type():
+    """Test note response with wrong type fails validation."""
+    client = PluginClient()
+    invalid_response = [
+        {
+            "key": "NOTE001",
+            "note": 123,  # Should be string
+            "tags": ["ai-generated"],
+            "parentItemKey": None,
+            "collections": ["ABC123"],
+            "dateAdded": "2024-12-30T10:00:00Z",
+            "dateModified": "2024-12-30T15:30:00Z",
+        }
+    ]
+
+    with pytest.raises(ValidationError):
+        client._validate_response(invalid_response, "NotesResponse")
+
+
+def test_note_create_response_valid():
+    """Test valid note create response passes validation."""
+    client = PluginClient()
+    valid_response = {"key": "NEWNOTE", "success": True}
+
+    # Should not raise
+    client._validate_response(valid_response, "NoteCreateResponse")
+```
+
+**Step 6: Run contract tests**
+
+```bash
+uv run pytest tests/test_plugin_contract.py -v
+```
+
+Expected: All tests PASS
+
+**Step 7: Add schema validation documentation**
+
+Create `plugin/schema/README.md`:
+
+```markdown
+# Plugin API Schema
+
+This directory contains JSON Schema definitions for the Zotero MCP Bridge plugin API.
+
+## Purpose
+
+Contract testing ensures the plugin (JavaScript) and MCP server (Python) maintain a stable API contract. The MCP server validates all plugin responses against these schemas.
+
+## Schema Definitions
+
+- `HealthResponse` - GET /health
+- `CollectionsResponse` - GET /collections
+- `ItemsResponse` - GET /items/search, GET /items/recent
+- `NotesResponse` - GET /notes
+- `NoteCreateResponse` - POST /notes/create
+- `NoteUpdateResponse` - PUT /notes/update
+
+## Adding New Endpoints
+
+When adding a new endpoint to the plugin:
+
+1. Add schema definition to `api-responses.json`
+2. Update `PluginClient` method to pass schema name
+3. Add contract tests in `tests/test_plugin_contract.py`
+4. Update this README
+
+## Validation
+
+Validation happens automatically in `PluginClient._request()`. If a response doesn't match the schema:
+
+- `ValidationError` is raised
+- Error is logged with details
+- MCP server returns error to user
+
+This catches breaking changes immediately rather than at runtime.
+```
+
+**Step 8: Commit contract testing**
+
+```bash
+git add plugin/schema/ pyproject.toml uv.lock src/zotero2ai/plugin/client.py tests/test_plugin_contract.py
+git commit -m "feat(mcp): add contract testing with JSON schema
+
+- Add JSON Schema definitions for all plugin endpoints
+- Integrate jsonschema validation in PluginClient
+- Validate all responses against schemas
+- Add comprehensive contract tests
+- Document schema usage and extension
+
+Contract testing prevents breaking changes between plugin
+and MCP server from reaching production."
 ```
 
 ---

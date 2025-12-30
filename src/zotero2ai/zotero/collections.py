@@ -3,6 +3,8 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
+
 from platformdirs import user_config_dir
 
 logger = logging.getLogger(__name__)
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 class ActiveCollectionManager:
     """Manages the 'active' collection state for the current user."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config_dir = Path(user_config_dir("zotero2ai"))
         self.config_file = self.config_dir / "config.json"
         self._ensure_config_dir()
@@ -27,7 +29,7 @@ class ActiveCollectionManager:
         if full_path:
             config["active_collection_path"] = full_path
 
-        with open(self.config_file, "w") as f:
+        with self.config_file.open("w") as f:
             json.dump(config, f, indent=2)
         logger.info(f"Set active collection to: {key} ({full_path})")
 
@@ -41,13 +43,14 @@ class ActiveCollectionManager:
         config = self._load_config()
         return config.get("active_collection_path")
 
-    def _load_config(self) -> dict:
+    def _load_config(self) -> dict[str, Any]:
         """Load config from disk."""
         if not self.config_file.exists():
             return {}
         try:
-            with open(self.config_file) as f:
-                return json.load(f)
+            with self.config_file.open() as f:
+                data: dict[str, Any] = json.load(f)
+                return data
         except Exception as e:
             logger.error(f"Error loading config: {e}")
             return {}

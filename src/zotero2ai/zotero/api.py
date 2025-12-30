@@ -1,7 +1,9 @@
 """Zotero Web API client for writing data."""
 
 import logging
-from pyzotero import zotero
+from typing import Any, cast
+
+from pyzotero import zotero  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class ZoteroWriter:
             self._zot = zotero.Zotero(self.library_id, self.library_type, self.api_key)
         return self._zot
 
-    def create_note(self, content: str, collection_key: str | None = None, parent_item_key: str | None = None) -> dict:
+    def create_note(self, content: str, collection_key: str | None = None, parent_item_key: str | None = None) -> dict[str, Any]:
         """Create a new note in Zotero.
 
         Args:
@@ -49,7 +51,7 @@ class ZoteroWriter:
             new_key = resp["success"]["0"]
             logger.info(f"Successfully created note with key: {new_key}")
             # Fetch the full object to return
-            return self.zot.item(new_key)
+            return cast(dict[str, Any], self.zot.item(new_key))
         else:
             error_msg = f"Failed to create note: {resp.get('failed', 'Unknown error')}"
             logger.error(error_msg)

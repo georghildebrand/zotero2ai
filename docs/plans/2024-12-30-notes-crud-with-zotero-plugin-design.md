@@ -218,9 +218,9 @@ Fetches notes from plugin and presents them with friendly names:
 
 ```
 Found 2 notes in collection:
-1. lucky-chicken: "Critical analysis of methodology"
+1. lucky-chicken (NOTE001): "Critical analysis of methodology"
    Created: 2 days ago, Modified: 1 day ago
-2. brave-turtle: "Comparison with Smith et al 2023"
+2. brave-turtle (NOTE002): "Comparison with Smith et al 2023"
    Created: yesterday
 ```
 
