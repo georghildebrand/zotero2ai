@@ -74,6 +74,11 @@ def resolve_zotero_user_id() -> str | None:
     return os.getenv("ZOTERO_USER_ID")
 
 
+def resolve_zotero_mcp_token() -> str | None:
+    """Resolve the Zotero MCP Bridge plugin authentication token from the ZOTERO_MCP_TOKEN environment variable."""
+    return os.getenv("ZOTERO_MCP_TOKEN")
+
+
 def validate_zotero_data_dir(data_dir: Path) -> None:
     """Validate that a directory is a valid Zotero data directory.
 

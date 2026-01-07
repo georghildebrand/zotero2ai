@@ -49,6 +49,12 @@ class ZoteroNote:
     date_added: datetime | None = None
     date_modified: datetime | None = None
 
+    @property
+    def title(self) -> str:
+        """Generate a friendly title for the note."""
+        from zotero2ai.zotero.utils import generate_friendly_name
+
+        return generate_friendly_name(self.content)
+
     def __repr__(self) -> str:
-        snippet = (self.content[:50] + "...") if len(self.content) > 50 else self.content
-        return f"ZoteroNote(parent='{self.parent_key}', snippet='{snippet}')"
+        return f"ZoteroNote(title='{self.title}', key='{self.key}')"

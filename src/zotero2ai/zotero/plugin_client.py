@@ -1,0 +1,278 @@
+"""HTTP client for communicating with the Zotero MCP Bridge plugin.
+
+This module provides a client for making authenticated requests to the
+Zotero plugin's HTTP server running on localhost.
+"""
+
+import logging
+from typing import Any, cast
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class PluginAuthError(Exception):
+    """Raised when plugin authentication fails."""
+
+    pass
+
+
+class PluginConnectionError(Exception):
+    """Raised when connection to the plugin fails."""
+
+    pass
+
+
+class PluginClient:
+    """HTTP client for the Zotero MCP Bridge plugin.
+
+    Communicates with the plugin's HTTP server using Bearer token authentication.
+    The plugin must be running and the auth token must be configured.
+    """
+
+    def __init__(self, base_url: str = "http://127.0.0.1:23119", auth_token: str | None = None, timeout: float = 10.0):
+        """Initialize the plugin client.
+
+        Args:
+            base_url: Base URL of the plugin HTTP server (default: http://127.0.0.1:23119)
+            auth_token: Bearer token for authentication. If None, must be set via set_auth_token()
+            timeout: Request timeout in seconds (default: 10.0)
+        """
+        self.base_url = base_url.rstrip("/")
+        self.auth_token = auth_token
+        self.timeout = timeout
+        self._client: httpx.Client | None = None
+
+    @property
+    def client(self) -> httpx.Client:
+        """Get or create the httpx client."""
+        if self._client is None:
+            headers = {}
+            if self.auth_token:
+                headers["Authorization"] = f"Bearer {self.auth_token}"
+
+            self._client = httpx.Client(
+                base_url=self.base_url,
+                headers=headers,
+                timeout=self.timeout,
+            )
+        return self._client
+
+    def set_auth_token(self, token: str) -> None:
+        """Set the authentication token.
+
+        Args:
+            token: Bearer token for authentication
+        """
+        self.auth_token = token
+        # Reset client to pick up new token
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def __enter__(self) -> "PluginClient":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Context manager exit."""
+        self.close()
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Make an authenticated request to the plugin.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, etc.)
+            path: Request path (e.g., "/collections")
+            **kwargs: Additional arguments to pass to httpx.request()
+
+        Returns:
+            Response JSON data
+
+        Raises:
+            PluginAuthError: If authentication fails (401)
+            PluginConnectionError: If connection to plugin fails
+            httpx.HTTPStatusError: For other HTTP errors
+        """
+        if not self.auth_token:
+            raise PluginAuthError("No authentication token configured. Set ZOTERO_MCP_TOKEN environment variable.")
+
+        try:
+            response = self.client.request(method, path, **kwargs)
+
+            # Handle authentication errors
+            if response.status_code == 401:
+                raise PluginAuthError("Authentication failed. Check that ZOTERO_MCP_TOKEN matches the plugin's token.")
+
+            # Raise for other HTTP errors
+            response.raise_for_status()
+
+            # Parse JSON response
+            return cast(dict[str, Any], response.json())
+
+        except httpx.ConnectError as e:
+            raise PluginConnectionError(f"Failed to connect to plugin at {self.base_url}. Ensure the Zotero MCP Bridge plugin is installed and Zotero is running.") from e
+        except httpx.TimeoutException as e:
+            raise PluginConnectionError(f"Request to plugin timed out after {self.timeout}s") from e
+
+    def health_check(self) -> dict[str, Any]:
+        """Check plugin health status.
+
+        Returns:
+            Health check response with status, version, and timestamp
+        """
+        return self._request("GET", "/health")
+
+    def get_collections(self) -> list[dict[str, Any]]:
+        """Get all Zotero collections.
+
+        Returns:
+            List of collection objects with keys, names, and paths
+        """
+        response = self._request("GET", "/collections")
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def search_items(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Search for items by title.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results (default: 10)
+
+        Returns:
+            List of matching items
+        """
+        response = self._request("GET", "/items/search", params={"q": query, "limit": limit})
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def get_recent_items(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Get recently added items.
+
+        Args:
+            limit: Maximum number of results (default: 5)
+
+        Returns:
+            List of recent items sorted by date added
+        """
+        response = self._request("GET", "/items/recent", params={"limit": limit})
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def get_notes(self, collection_key: str | None = None, parent_item_key: str | None = None) -> list[dict[str, Any]]:
+        """Get notes (summaries).
+
+        Args:
+            collection_key: Filter notes by collection key
+            parent_item_key: Filter notes attached to a specific item
+
+        Returns:
+            List of note summaries
+
+        Raises:
+            ValueError: If neither collection_key nor parent_item_key is provided
+        """
+        if not collection_key and not parent_item_key:
+            raise ValueError("Must provide either collection_key or parent_item_key")
+
+        params = {}
+        if collection_key:
+            params["collectionKey"] = collection_key
+        if parent_item_key:
+            params["parentItemKey"] = parent_item_key
+
+        response = self._request("GET", "/notes", params=params)
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def get_note(self, key: str) -> dict[str, Any]:
+        """Get full note content by key.
+
+        Args:
+            key: Note key (e.g., "ABC123XYZ")
+
+        Returns:
+            Complete note data including HTML content and metadata
+
+        Raises:
+            httpx.HTTPStatusError: If note not found (404)
+        """
+        response = self._request("GET", f"/notes/{key}")
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def create_note(
+        self,
+        content: str,
+        tags: list[str] | None = None,
+        collections: list[str] | None = None,
+        parent_item_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new note.
+
+        Args:
+            content: HTML content of the note
+            tags: Optional list of tags
+            collections: Optional list of collection keys
+            parent_item_key: Optional parent item key to attach note to
+
+        Returns:
+            Created note data
+        """
+        body: dict[str, Any] = {"note": content}
+
+        if tags is not None:
+            body["tags"] = tags
+        if collections is not None:
+            body["collections"] = collections
+        if parent_item_key is not None:
+            body["parentItemKey"] = parent_item_key
+
+        response = self._request("POST", "/notes", json=body)
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def update_note(
+        self,
+        key: str,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        collections: list[str] | None = None,
+        parent_item_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing note."""
+        body: dict[str, Any] = {}
+
+        if content is not None:
+            body["note"] = content
+        if tags is not None:
+            body["tags"] = tags
+        if collections is not None:
+            body["collections"] = collections
+        if parent_item_key is not None:
+            body["parentItemKey"] = parent_item_key
+
+        response = self._request("PUT", f"/notes/{key}", json=body)
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def extend_note(self, key: str, additional_content: str) -> dict[str, Any]:
+        """Extend an existing note by appending content.
+
+        Args:
+            key: Note key
+            additional_content: HTML content to append to the note
+
+        Returns:
+            Updated note data
+        """
+        # First, get the current note content
+        current_note = self.get_note(key)
+        current_content = current_note.get("note", "")
+
+        # Append the new content
+        new_content = current_content + "\n" + additional_content
+
+        # Update the note
+        return self.update_note(key, content=new_content)

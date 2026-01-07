@@ -84,10 +84,16 @@ class TestCmdDoctor:
 
         # Mock resolve_zotero_data_dir to return our test directory
         monkeypatch.setenv("ZOTERO_DATA_DIR", str(zotero_dir))
+        monkeypatch.setenv("ZOTERO_MCP_TOKEN", "test-token")
 
-        # Run doctor command
-        exit_code = cmd_doctor()
-        assert exit_code == 0
+        import respx
+        from httpx import Response
+
+        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+            respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
+            # Run doctor command
+            exit_code = cmd_doctor()
+            assert exit_code == 0
 
     def test_doctor_missing_directory(self, monkeypatch):
         """Test doctor command with missing Zotero directory."""
@@ -234,10 +240,16 @@ class TestMain:
         conn.close()
 
         monkeypatch.setenv("ZOTERO_DATA_DIR", str(zotero_dir))
+        monkeypatch.setenv("ZOTERO_MCP_TOKEN", "test-token")
         monkeypatch.setattr(sys, "argv", ["mcp-zotero2ai", "doctor"])
 
-        exit_code = main()
-        assert exit_code == 0
+        import respx
+        from httpx import Response
+
+        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+            respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
+            exit_code = main()
+            assert exit_code == 0
 
     @patch("zotero2ai.mcp_server.server.create_mcp_server")
     def test_main_run(self, mock_create_server, monkeypatch):
@@ -265,10 +277,16 @@ class TestMain:
         conn.close()
 
         monkeypatch.setenv("ZOTERO_DATA_DIR", str(zotero_dir))
+        monkeypatch.setenv("ZOTERO_MCP_TOKEN", "test-token")
         monkeypatch.setattr(sys, "argv", ["mcp-zotero2ai", "--debug", "doctor"])
 
-        exit_code = main()
-        assert exit_code == 0
+        import respx
+        from httpx import Response
+
+        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+            respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
+            exit_code = main()
+            assert exit_code == 0
 
     @patch("zotero2ai.mcp_server.server.create_mcp_server")
     def test_main_with_quiet_flag(self, mock_create_server, monkeypatch):
@@ -328,9 +346,15 @@ class TestCLIIntegration:
         conn.close()
 
         monkeypatch.setenv("ZOTERO_DATA_DIR", str(zotero_dir))
+        monkeypatch.setenv("ZOTERO_MCP_TOKEN", "test-token")
 
-        exit_code = cmd_doctor()
-        assert exit_code == 0
+        import respx
+        from httpx import Response
+
+        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+            respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
+            exit_code = cmd_doctor()
+            assert exit_code == 0
 
     def test_doctor_output_failure(self, monkeypatch):
         """Test doctor command fails with invalid setup."""

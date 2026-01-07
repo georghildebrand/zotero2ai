@@ -57,17 +57,20 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
 
 def cmd_doctor() -> int:
-    """Validate Zotero setup and database access.
+    """Validate Zotero setup, database access, and plugin connection.
 
     Returns:
         Exit code: 0 on success, 1 on failure.
     """
     import logging
 
+    from zotero2ai.config import resolve_zotero_mcp_token
+    from zotero2ai.zotero.plugin_client import PluginClient
+
     logger = logging.getLogger("zotero2ai.cli")
 
     try:
-        # Resolve Zotero data directory
+        # Resolve Zotero data directory (Heritage check)
         logger.info("Resolving Zotero data directory...")
         zotero_dir = resolve_zotero_data_dir()
         logger.info(f"✓ Found Zotero data directory: {zotero_dir}")
@@ -79,32 +82,34 @@ def cmd_doctor() -> int:
             return 1
         logger.info(f"✓ Database found: {db_path}")
 
-        # Verify storage directory exists
-        storage_path = zotero_dir / "storage"
-        if not storage_path.exists():
-            logger.error(f"✗ Storage directory not found: {storage_path}")
-            return 1
-        logger.info(f"✓ Storage directory found: {storage_path}")
-
         # Test read-only database connection
         logger.info("Testing database connection...")
         db_uri = f"file:{db_path}?mode=ro"
         conn = sqlite3.connect(db_uri, uri=True)
-
         try:
             cursor = conn.cursor()
-            # Run a simple sanity query
             cursor.execute("SELECT COUNT(*) FROM items")
             item_count = cursor.fetchone()[0]
             logger.info(f"✓ Database connection successful: {item_count} items found")
-
-            # Check for collections table
-            cursor.execute("SELECT COUNT(*) FROM collections")
-            collection_count = cursor.fetchone()[0]
-            logger.info(f"✓ Collections table accessible: {collection_count} collections found")
-
         finally:
             conn.close()
+
+        # Check Plugin Connection (New Requirement)
+        logger.info("Checking Zotero Bridge Plugin connection...")
+        token = resolve_zotero_mcp_token()
+        if not token:
+            logger.error("✗ ZOTERO_MCP_TOKEN not found in environment")
+            return 1
+        logger.info("✓ ZOTERO_MCP_TOKEN found")
+
+        try:
+            with PluginClient(auth_token=token) as client:
+                health = client.health_check()
+                logger.info(f"✓ Successfully connected to Zotero Plugin (v{health.get('version', 'unknown')})")
+        except Exception as e:
+            logger.error(f"✗ Failed to connect to Zotero Plugin: {e}")
+            logger.error("  Ensure Zotero is running and the Bridge Plugin is installed.")
+            return 1
 
         logger.info("✓ All checks passed!")
         return 0

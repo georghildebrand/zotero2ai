@@ -3,63 +3,63 @@ Revised Execution DAG (Waves)
   Wave 1: Foundation
 
   PARALLEL:
-  ├─ 1.1: Plugin Directory Structure
-  └─ 4.1: Python Dependencies
+  ├─ 1.1: Plugin Directory Structure [x]
+  └─ 4.1: Python Dependencies [x]
   Duration: ~5 mins
 
   ---
-  Wave 2: Security + HTTP Foundation (CRITICAL)
+  Wave 2: Security + HTTP Foundation (CRITICAL) [x]
 
   SEQUENTIAL:
-  ├─ 1.2: Authentication System (token generation, storage)
-  ├─ 1.3: Production HTTP Server (body reading, UTF-8, Connection: close, OPTIONS)
-  └─ 1.4: Request Handlers with Auth Enforcement
+  ├─ 1.2: Authentication System (token generation, storage) [x]
+  ├─ 1.3: Production HTTP Server (body reading, UTF-8, Connection: close, OPTIONS) [x]
+  └─ 1.4: Request Handlers with Auth Enforcement [x]
   Duration: ~40-50 mins
   Critical: Must be rock-solid before any endpoints
 
   ---
-  Wave 3: Plugin Read Ops (Complete CRUD)
+  Wave 3: Plugin Read Ops (Complete CRUD) [x]
 
   PARALLEL:
-  ├─ 2.1: GET /collections
-  ├─ 2.2: GET /items/search, /items/recent
-  ├─ 2.3: GET /notes (summaries)
-  ├─ 2.4: GET /notes/{key} (full content) ⬅️ CRITICAL for CRUD
-  └─ 5.2: Plugin Installation Guide (docs in parallel)
+  ├─ 2.1: GET /collections [x]
+  ├─ 2.2: GET /items/search, /items/recent [x]
+  ├─ 2.3: GET /notes (summaries) [x]
+  ├─ 2.4: GET /notes/{key} (full content) ⬅️ CRITICAL for CRUD [x]
+  └─ 5.2: Plugin Installation Guide (docs in parallel) [x]
   Duration: ~20 mins
 
   ---
-  Wave 4: Plugin Write Ops + Python Client
+  Wave 4: Plugin Write Ops + Python Client [x]
 
   PARALLEL:
-  ├─ 3.1: POST /notes (create)
-  ├─ 3.2: PUT /notes/{key} (update)
-  └─ 4.2: Plugin HTTP Client with Auth
+  ├─ 3.1: POST /notes (create) [x]
+  ├─ 3.2: PUT /notes/{key} (update) [x]
+  └─ 4.2: Plugin HTTP Client with Auth [x]
   Duration: ~20 mins
 
   ---
-  Wave 5: MCP Integration
+  Wave 5: MCP Integration [x]
 
   SEQUENTIAL:
-  ├─ 4.3: Friendly Name Generation (display-only)
-  ├─ 4.4: Update MCP Server
-  ├─ 4.5: list_notes Tool
-  ├─ 4.6: read_note Tool (uses GET /notes/{key})
-  └─ 4.7: create_or_extend_note Tool
+  ├─ 4.3: Friendly Name Generation (display-only) [x]
+  ├─ 4.4: Update MCP Server [x]
+  ├─ 4.5: list_notes Tool [x]
+  ├─ 4.6: read_note Tool (uses GET /notes/{key}) [x]
+  └─ 4.7: create_or_extend_note Tool [x]
   Duration: ~25 mins
 
   ---
-  Wave 6: Testing
+  Wave 6: Testing [x]
 
   PARALLEL:
-  ├─ 5.1: Integration Tests
-  └─ 5.1b: Contract Testing with JSON Schema
+  ├─ 5.1: Integration Tests [x]
+  └─ 5.1b: Contract Testing with JSON Schema [x]
   Duration: ~20 mins
 
   ---
   Wave 7: Release
 
-  5.3: Update README → 6.1: Build XPI → 6.2: CHANGELOG → 6.3: Tag Release
+  5.3: Update README → 6.1: Build XPI → 6.2: CHANGELOG → 6.3: Tag Release [x]
   Duration: ~10 mins
 
   ---
