@@ -1,284 +1,190 @@
-/* global Components, Services, Zotero */
+/* global Components, Services, Zotero, AuthManager, RequestHandlers */
 
-const { HttpServer } = ChromeUtils.import("resource://gre/modules/Http.jsm");
-
-/**
- * Production HTTP server for MCP Bridge
- * Handles all HTTP communication with proper UTF-8, CORS, and security
- */
-class MCPServer {
+var MCPServer = class {
     constructor() {
-        this.server = null;
-        this.port = 23119; // Default port
-        this.host = "127.0.0.1"; // Loopback only for security
+        this.serverSocket = null;
+        this.port = 23120; // Port 23120
+        this.host = "127.0.0.1";
         this.authManager = null;
         this.handlers = null;
     }
 
-    /**
-     * Start the HTTP server
-     */
     async start() {
         Zotero.debug("MCPServer: Starting...");
 
-        // Initialize authentication
         this.authManager = new AuthManager();
         await this.authManager.init();
-
-        // Initialize request handlers
         this.handlers = new RequestHandlers(this.authManager);
 
-        // Create and configure HTTP server
-        this.server = new HttpServer();
-        this.server.registerPrefixHandler("/", this.handleRequest.bind(this));
+        try {
+            this.serverSocket = Components.classes["@mozilla.org/network/server-socket;1"]
+                .createInstance(Components.interfaces.nsIServerSocket);
 
-        // Start server on loopback only
-        this.server.start(this.port);
+            this.serverSocket.init(this.port, true, -1);
+            this.serverSocket.asyncListen(this);
 
-        Zotero.debug(`MCPServer: Listening on ${this.host}:${this.port}`);
-        Zotero.debug(`MCPServer: Auth token = ${this.authManager.getToken()}`);
-    }
-
-    /**
-     * Stop the HTTP server
-     */
-    async stop() {
-        if (this.server) {
-            Zotero.debug("MCPServer: Stopping...");
-            await new Promise((resolve) => {
-                this.server.stop(() => {
-                    Zotero.debug("MCPServer: Stopped");
-                    resolve();
-                });
-            });
-            this.server = null;
+            Zotero.debug(`MCPServer: Listening on ${this.host}:${this.port}`);
+            Zotero.debug(`MCPServer: Auth token = ${this.authManager.getToken()}`);
+        } catch (e) {
+            Zotero.debug(`MCPServer: FATAL ERROR starting server: ${e}`);
+            throw e;
         }
     }
 
-    /**
-     * Main request handler
-     * Handles OPTIONS, body reading, UTF-8, and delegates to route handlers
-     */
-    handleRequest(request, response) {
-        try {
-            Zotero.debug(`MCPServer: ${request.method} ${request.path}`);
+    async stop() {
+        if (this.serverSocket) {
+            try { this.serverSocket.close(); } catch (e) { }
+            this.serverSocket = null;
+            Zotero.debug("MCPServer: Stopped");
+        }
+    }
 
-            // Handle OPTIONS for CORS preflight
-            if (request.method === "OPTIONS") {
-                this.handleOptions(response);
+    // WICHTIG: Diese Methode wird vom System aufgerufen. 
+    // Wir machen sie 'async', um await für die Handler nutzen zu können.
+    async onSocketAccepted(serverSocket, transport) {
+        try {
+            const input = transport.openInputStream(0, 0, 0);
+            const output = transport.openOutputStream(0, 0, 0);
+
+            const scriptableIn = Components.classes["@mozilla.org/scriptableinputstream;1"]
+                .createInstance(Components.interfaces.nsIScriptableInputStream);
+            scriptableIn.init(input);
+
+            let rawData = "";
+            if (scriptableIn.available()) {
+                rawData = scriptableIn.read(scriptableIn.available());
+            }
+
+            if (!rawData) {
+                input.close();
+                output.close();
                 return;
             }
 
-            // Security: Enforce Host header check to prevent DNS rebinding
-            // This ensures we only accept requests intended for localhost
+            const request = this.parseRawRequest(rawData);
+
+            // WICHTIG: Hier warten wir auf die asynchrone Handler-Antwort
+            const response = await this.handleRequestWrapper(request);
+
+            this.sendResponse(output, response);
+
+            scriptableIn.close();
+            input.close();
+            // output wird in sendResponse geschlossen
+        } catch (e) {
+            Zotero.debug(`MCPServer: Connection error: ${e}`);
+        }
+    }
+
+    onStopListening(serverSocket, status) { }
+
+    parseRawRequest(rawData) {
+        const lines = rawData.split('\r\n');
+        const [method, pathStr] = lines[0].split(' ');
+
+        const headers = {};
+        let lineIndex = 1;
+        while (lineIndex < lines.length && lines[lineIndex] !== '') {
+            const line = lines[lineIndex];
+            const separator = line.indexOf(':');
+            if (separator > -1) {
+                headers[line.substring(0, separator).trim().toLowerCase()] = line.substring(separator + 1).trim();
+            }
+            lineIndex++;
+        }
+
+        let body = null;
+        if (lineIndex < lines.length - 1) {
+            const bodyStr = lines.slice(lineIndex + 1).join('\r\n').replace(/\0/g, '');
             try {
-                const hostHeader = request.getHeader("Host");
-                const hostname = hostHeader ? hostHeader.split(":")[0] : "";
-                if (hostname !== "127.0.0.1" && hostname !== "localhost") {
-                    Zotero.debug(`MCPServer: Rejected request with invalid Host header: ${hostname}`);
-                    this.sendResponse(response, {
-                        statusCode: 403,
-                        body: { error: "Forbidden: Invalid Host header" }
-                    });
-                    return;
+                if (bodyStr.trim().startsWith('{') || bodyStr.trim().startsWith('[')) {
+                    body = JSON.parse(bodyStr);
+                } else {
+                    body = bodyStr;
                 }
             } catch (e) {
-                Zotero.debug(`MCPServer: Error checking Host header (likely missing): ${e}`);
-                this.sendResponse(response, {
-                    statusCode: 400,
-                    body: { error: "Bad Request: Missing or invalid Host header" }
-                });
-                return;
+                body = bodyStr;
             }
+        }
 
-            // Read request body if present
-            let body = null;
-            if (request.method === "POST" || request.method === "PUT") {
-                body = this.readRequestBody(request);
-            }
-
-            // Parse query parameters from URL
-            const query = this.parseQueryParams(request.path);
-
-            // Build request object
-            const req = {
-                method: request.method,
-                path: request.path.split('?')[0], // Remove query string from path
-                query: query,
-                headers: this.extractHeaders(request),
-                body: body
-            };
-
-            // Delegate to handlers
-            const result = this.handlers.handle(req);
-
-            // Send response
-            this.sendResponse(response, result);
-
-        } catch (error) {
-            Zotero.debug(`MCPServer: Error handling request: ${error}`);
-            this.sendResponse(response, {
-                statusCode: 500,
-                body: { error: "Internal server error" }
+        let path = pathStr;
+        let query = {};
+        if (pathStr && pathStr.includes('?')) {
+            const parts = pathStr.split('?');
+            path = parts[0];
+            const queryString = parts[1];
+            queryString.split('&').forEach(param => {
+                const [key, value] = param.split('=');
+                if (key) query[decodeURIComponent(key)] = value ? decodeURIComponent(value) : '';
             });
         }
+
+        return { method, path, query, headers, body };
     }
 
-    /**
-     * Handle OPTIONS request for CORS
-     */
-    handleOptions(response) {
-        response.setStatusLine("1.1", 204, "No Content");
-        this.setCORSHeaders(response);
-        response.setHeader("Allow", "GET, POST, PUT, DELETE, OPTIONS", false);
-        response.finish();
-    }
-
-    /**
-     * Read request body with proper UTF-8 handling
-     * CRITICAL: Uses Content-Length, not available()
-     */
-    readRequestBody(request) {
+    async handleRequestWrapper(request) {
         try {
-            const contentLength = parseInt(request.getHeader("Content-Length") || "0");
-
-            if (contentLength === 0) {
-                return null;
+            if (request.method === "OPTIONS") {
+                return { statusCode: 204, headers: this.getCORSHeaders(), body: null };
             }
 
-            // Read exact number of bytes specified by Content-Length
-            const inputStream = request.bodyInputStream;
-            const scriptableStream = Components.classes["@mozilla.org/scriptableinputstream;1"]
-                .createInstance(Components.interfaces.nsIScriptableInputStream);
-            scriptableStream.init(inputStream);
-
-            // Read bytes
-            const bytes = scriptableStream.read(contentLength);
-            scriptableStream.close();
-
-            // Convert from UTF-8 bytes to string
-            const converter = Components.classes["@mozilla.org/intl/scriptableunicodeconverter"]
-                .createInstance(Components.interfaces.nsIScriptableUnicodeConverter);
-            converter.charset = "UTF-8";
-
-            const bodyString = converter.ConvertToUnicode(bytes);
-
-            // Parse JSON if content-type is JSON
-            const contentType = request.getHeader("Content-Type") || "";
-            if (contentType.includes("application/json")) {
-                return JSON.parse(bodyString);
+            const host = request.headers['host'];
+            if (!host || (!host.startsWith('127.0.0.1') && !host.startsWith('localhost'))) {
+                return { statusCode: 403, body: { error: "Forbidden: Invalid Host header" } };
             }
 
-            return bodyString;
+            // WICHTIG: await hier, da die Handler nun async sind
+            const result = await this.handlers.handle(request);
 
-        } catch (error) {
-            Zotero.debug(`MCPServer: Error reading request body: ${error}`);
-            throw error;
+            if (!result.headers) result.headers = {};
+            Object.assign(result.headers, this.getCORSHeaders());
+            return result;
+        } catch (e) {
+            return { statusCode: 500, body: { error: "Internal Server Error", details: e.message } };
         }
     }
 
-    /**
-     * Parse query parameters from URL path
-     * @param {string} path - Request path potentially containing query string
-     * @returns {Object} Object with query parameter key-value pairs
-     */
-    parseQueryParams(path) {
-        const query = {};
-        const queryIndex = path.indexOf('?');
+    sendResponse(outputStream, responseData) {
+        const statusCode = responseData.statusCode || 200;
+        const statusText = statusCode === 200 ? "OK" : (statusCode === 404 ? "Not Found" : "Result");
 
-        if (queryIndex === -1) {
-            return query;
+        let bodyStr = "";
+        if (responseData.body) {
+            bodyStr = typeof responseData.body === 'string' ? responseData.body : JSON.stringify(responseData.body);
         }
 
-        const queryString = path.substring(queryIndex + 1);
-        const pairs = queryString.split('&');
+        const encoder = new TextEncoder();
+        const bodyBytes = encoder.encode(bodyStr);
 
-        for (const pair of pairs) {
-            const [key, value] = pair.split('=');
-            if (key) {
-                query[decodeURIComponent(key)] = value ? decodeURIComponent(value) : '';
-            }
+        let responseHead = `HTTP/1.1 ${statusCode} ${statusText}\r\n`;
+
+        const headers = responseData.headers || {};
+        headers["Content-Type"] = "application/json; charset=utf-8";
+        headers["Content-Length"] = bodyBytes.length;
+        headers["Connection"] = "close";
+
+        for (const key in headers) {
+            responseHead += `${key}: ${headers[key]}\r\n`;
         }
+        responseHead += "\r\n";
 
-        return query;
-    }
+        const bos = Components.classes["@mozilla.org/binaryoutputstream;1"]
+            .createInstance(Components.interfaces.nsIBinaryOutputStream);
+        bos.setOutputStream(outputStream);
 
-    /**
-     * Extract headers from request
-     */
-    extractHeaders(request) {
-        const headers = {};
-        const headerEnum = request.headers;
-
-        while (headerEnum.hasMoreElements()) {
-            const header = headerEnum.getNext().QueryInterface(Components.interfaces.nsISupportsString);
-            const [name, value] = header.data.split(": ", 2);
-            headers[name.toLowerCase()] = value;
+        bos.writeBytes(responseHead, responseHead.length);
+        if (bodyBytes.length > 0) {
+            bos.writeByteArray(Array.from(bodyBytes), bodyBytes.length);
         }
-
-        return headers;
+        bos.close();
     }
 
-    /**
-     * Send HTTP response with proper UTF-8 and headers
-     */
-    sendResponse(response, result) {
-        const statusCode = result.statusCode || 200;
-        const body = result.body || {};
-
-        // Set status
-        response.setStatusLine("1.1", statusCode, this.getStatusText(statusCode));
-
-        // Set CORS headers
-        this.setCORSHeaders(response);
-
-        // CRITICAL: Always send Connection: close
-        response.setHeader("Connection", "close", false);
-
-        // Convert body to JSON
-        const jsonBody = JSON.stringify(body);
-
-        // Convert to UTF-8 bytes and calculate Content-Length
-        const converter = Components.classes["@mozilla.org/intl/scriptableunicodeconverter"]
-            .createInstance(Components.interfaces.nsIScriptableUnicodeConverter);
-        converter.charset = "UTF-8";
-
-        const bodyBytes = converter.ConvertFromUnicode(jsonBody);
-        const byteLength = bodyBytes.length;
-
-        // Set headers
-        response.setHeader("Content-Type", "application/json; charset=utf-8", false);
-        response.setHeader("Content-Length", byteLength.toString(), false);
-
-        // Write body
-        response.write(bodyBytes);
-        response.finish();
-    }
-
-    /**
-     * Set CORS headers for cross-origin requests
-     */
-    setCORSHeaders(response) {
-        response.setHeader("Access-Control-Allow-Origin", "*", false);
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS", false);
-        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization", false);
-        response.setHeader("Access-Control-Max-Age", "86400", false);
-    }
-
-    /**
-     * Get HTTP status text
-     */
-    getStatusText(code) {
-        const statusTexts = {
-            200: "OK",
-            201: "Created",
-            204: "No Content",
-            400: "Bad Request",
-            401: "Unauthorized",
-            403: "Forbidden",
-            404: "Not Found",
-            500: "Internal Server Error"
+    getCORSHeaders() {
+        return {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400"
         };
-        return statusTexts[code] || "Unknown";
     }
-}
+};

@@ -40,7 +40,7 @@ Expected: Plugin loads without errors.
 Example:
 ```
 AuthManager: Token = a1b2c3d4e5f6...
-MCPServer: Listening on 127.0.0.1:23119
+MCPServer: Listening on 127.0.0.1:23120
 MCPServer: Auth token = a1b2c3d4e5f6...
 ```
 
@@ -51,13 +51,13 @@ MCPServer: Auth token = a1b2c3d4e5f6...
 Check that the HTTP server is listening:
 
 ```bash
-lsof -i :23119
+lsof -i :23120
 ```
 
 Expected output:
 ```
 COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
-zotero    123 user   10u  IPv4 0x...      0t0  TCP localhost:23119 (LISTEN)
+zotero    123 user   10u  IPv4 0x...      0t0  TCP localhost:23120 (LISTEN)
 ```
 
 If nothing appears, check Zotero's debug logs for errors.
@@ -73,7 +73,7 @@ export AUTH_TOKEN="your-64-character-token-here"
 ### 2.1 Test Health Check (No Auth Required)
 
 ```bash
-curl -X GET http://127.0.0.1:23119/health \
+curl -X GET http://127.0.0.1:23120/health \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -90,7 +90,7 @@ Expected response:
 
 **Missing token:**
 ```bash
-curl -X GET http://127.0.0.1:23119/collections
+curl -X GET http://127.0.0.1:23120/collections
 ```
 
 Expected: `401 Unauthorized`
@@ -103,7 +103,7 @@ Expected: `401 Unauthorized`
 
 **Invalid token:**
 ```bash
-curl -X GET http://127.0.0.1:23119/collections \
+curl -X GET http://127.0.0.1:23120/collections \
   -H "Authorization: Bearer invalid-token-123"
 ```
 
@@ -111,7 +111,7 @@ Expected: `401 Unauthorized`
 
 **Valid token:**
 ```bash
-curl -X GET http://127.0.0.1:23119/collections \
+curl -X GET http://127.0.0.1:23120/collections \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -121,9 +121,9 @@ Expected: `200 OK` with collections data.
 
 **Invalid Host header:**
 ```bash
-curl -X GET http://127.0.0.1:23119/health \
+curl -X GET http://127.0.0.1:23120/health \
   -H "Authorization: Bearer $AUTH_TOKEN" \
-  -H "Host: evil.com:23119"
+  -H "Host: evil.com:23120"
 ```
 
 Expected: `403 Forbidden`
@@ -136,11 +136,11 @@ Expected: `403 Forbidden`
 **Valid Host headers:**
 ```bash
 # localhost
-curl -X GET http://localhost:23119/health \
+curl -X GET http://localhost:23120/health \
   -H "Authorization: Bearer $AUTH_TOKEN"
 
 # 127.0.0.1
-curl -X GET http://127.0.0.1:23119/health \
+curl -X GET http://127.0.0.1:23120/health \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -149,7 +149,7 @@ Expected: Both return `200 OK`.
 ### 2.4 Test Collections Endpoint
 
 ```bash
-curl -X GET http://127.0.0.1:23119/collections \
+curl -X GET http://127.0.0.1:23120/collections \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -172,7 +172,7 @@ Expected response:
 ### 2.5 Test Item Search
 
 ```bash
-curl -X GET "http://127.0.0.1:23119/items/search?q=machine+learning&limit=5" \
+curl -X GET "http://127.0.0.1:23120/items/search?q=machine+learning&limit=5" \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -181,7 +181,7 @@ Expected: Returns matching items (or empty array if no matches).
 ### 2.6 Test Recent Items
 
 ```bash
-curl -X GET "http://127.0.0.1:23119/items/recent?limit=3" \
+curl -X GET "http://127.0.0.1:23120/items/recent?limit=3" \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -194,7 +194,7 @@ Expected: Returns 3 most recently added items.
 First, get a collection key from the collections endpoint, then:
 
 ```bash
-curl -X GET "http://127.0.0.1:23119/notes?collectionKey=ABC123XYZ" \
+curl -X GET "http://127.0.0.1:23120/notes?collectionKey=ABC123XYZ" \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -203,7 +203,7 @@ Expected: Returns note summaries.
 #### Create Note
 
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -220,7 +220,7 @@ Expected: `201 Created` with note data including the new note's key.
 #### Read Full Note
 
 ```bash
-curl -X GET http://127.0.0.1:23119/notes/YOUR_NOTE_KEY \
+curl -X GET http://127.0.0.1:23120/notes/YOUR_NOTE_KEY \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -229,7 +229,7 @@ Expected: `200 OK` with full note content.
 #### Update Note
 
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/YOUR_NOTE_KEY \
+curl -X PUT http://127.0.0.1:23120/notes/YOUR_NOTE_KEY \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -272,7 +272,7 @@ uv run zotero2ai
 Expected: Server starts without errors. You should see:
 ```
 INFO: MCP server initialized
-INFO: Connected to plugin at http://127.0.0.1:23119
+INFO: Connected to plugin at http://127.0.0.1:23120
 ```
 
 ### 3.3 Test MCP Tools via CLI
@@ -331,14 +331,14 @@ Expected: All operations succeed, note shows both sections.
 ### 4.1 Verify Localhost-Only Binding
 
 ```bash
-netstat -an | grep 23119
+netstat -an | grep 23120
 ```
 
-Expected output should show `127.0.0.1:23119` or `localhost:23119`, NOT `0.0.0.0:23119`.
+Expected output should show `127.0.0.1:23120` or `localhost:23120`, NOT `0.0.0.0:23120`.
 
 Example:
 ```
-tcp4       0      0  127.0.0.1.23119        *.*                    LISTEN
+tcp4       0      0  127.0.0.1.23120        *.*                    LISTEN
 ```
 
 If you see `0.0.0.0`, the server is exposed to the network - THIS IS A SECURITY ISSUE.
@@ -349,7 +349,7 @@ If you have another machine on your network, try:
 
 ```bash
 # From another machine
-curl -X GET http://<your-ip>:23119/health \
+curl -X GET http://<your-ip>:23120/health \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -378,7 +378,7 @@ Expected: Token persists across Zotero restarts.
 
 **Missing required field:**
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"tags": ["test"]}'
@@ -388,7 +388,7 @@ Expected: `400 Bad Request` - "Missing required field: note"
 
 **Invalid note key:**
 ```bash
-curl -X GET http://127.0.0.1:23119/notes/INVALID_KEY \
+curl -X GET http://127.0.0.1:23120/notes/INVALID_KEY \
   -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
@@ -396,7 +396,7 @@ Expected: `404 Not Found`
 
 **Invalid collection key:**
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -410,7 +410,7 @@ Expected: `400 Bad Request` - "Collection not found: INVALID_KEY"
 ### 5.2 Test UTF-8 Handling
 
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/json; charset=utf-8" \
   -d '{
@@ -455,7 +455,7 @@ Expected: All operations work through natural language.
 ### Server Not Starting
 
 - Check Zotero debug logs: `MCPServer: Starting...`
-- Verify port 23119 is not in use: `lsof -i :23119`
+- Verify port 23120 is not in use: `lsof -i :23120`
 - Try restarting Zotero
 
 ### Authentication Failing
@@ -468,7 +468,7 @@ Expected: All operations work through natural language.
 
 - Plugin may not be fully loaded
 - Check Zotero debug logs for errors during startup
-- Verify HttpServer started: `MCPServer: Listening on 127.0.0.1:23119`
+- Verify HttpServer started: `MCPServer: Listening on 127.0.0.1:23120`
 
 ### UTF-8 Content Corrupted
 

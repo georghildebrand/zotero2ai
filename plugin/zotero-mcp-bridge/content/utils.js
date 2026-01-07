@@ -1,31 +1,19 @@
 /* global Zotero */
 
-/**
- * Utility functions for MCP Bridge
- */
-class MCPUtils {
-    /**
-     * Get full hierarchical path for a collection
-     * @param {Object} collection - Zotero collection object
-     * @returns {string} Full path with parent collections separated by " / "
-     */
+var MCPUtils = class {
     static getCollectionPath(collection) {
-        let path = collection.getName();
-        let parent = collection.getParent();
+        // Zotero 7 nutzt Properties, Zotero 6 Methoden. Wir nutzen robust Properties.
+        let path = collection.name || (typeof collection.getName === 'function' ? collection.getName() : "Unknown");
+        let parent = collection.parent || (typeof collection.getParent === 'function' ? collection.getParent() : null);
 
         while (parent) {
-            path = parent.getName() + " / " + path;
-            parent = parent.getParent();
+            let parentName = parent.name || (typeof parent.getName === 'function' ? parent.getName() : "Unknown");
+            path = parentName + " / " + path;
+            parent = parent.parent || (typeof parent.getParent === 'function' ? parent.getParent() : null);
         }
-
         return path;
     }
 
-    /**
-     * Format error response
-     * @param {string} message - Error message
-     * @returns {Object} Formatted error response
-     */
     static formatError(message) {
         return {
             statusCode: 400,
@@ -33,15 +21,10 @@ class MCPUtils {
         };
     }
 
-    /**
-     * Format success response
-     * @param {*} data - Response data
-     * @returns {Object} Formatted success response
-     */
     static formatSuccess(data) {
         return {
             statusCode: 200,
-            body: data
+            body: { success: true, data: data } // Standardisiertes Format
         };
     }
-}
+};
