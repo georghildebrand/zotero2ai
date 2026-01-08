@@ -87,6 +87,39 @@ To integrate with ChatGPT Desktop, run the automated setup script (requires `ZOT
 ./scripts/setup-chatgpt-desktop.sh
 ```
 
+### Claude Code Integration
+
+To register `zotero2ai` as a global MCP server in Claude Code, run the following command:
+
+```bash
+# Register using the CLI (replace with your actual token)
+claude mcp add zotero2ai \
+  --scope user \
+  -e ZOTERO_MCP_TOKEN="your_generated_token_here" \
+  -- $(which uv) --directory $(pwd) run mcp-zotero2ai run
+```
+
+Alternatively, you can add it using a JSON string:
+
+```bash
+claude mcp add-json zotero2ai '{
+    "command": "'$(which uv)'",
+    "args": [
+        "--directory",
+        "'$PWD'",
+        "run",
+        "mcp-zotero2ai",
+        "run"
+    ],
+    "env": {
+        "ZOTERO_MCP_TOKEN": "your_generated_token_here"
+    }
+}' --scope user
+```
+
+> [!TIP]
+> Use `--scope project` if you only want the server available within this specific repository.
+
 ## Development
 
 The `Makefile` provides several utility targets for development and quality assurance:
