@@ -14,8 +14,7 @@ This guide walks through manual testing of the Zotero MCP Bridge plugin and MCP 
 ### 1.1 Build the Plugin
 
 ```bash
-cd plugin/zotero-mcp-bridge
-zip -r zotero-mcp-bridge.xpi * -x ".*" -x "*/.*" -x "*.md"
+./pluging/build.sh
 ```
 
 Expected: `zotero-mcp-bridge.xpi` file created.
@@ -28,7 +27,7 @@ Expected: `zotero-mcp-bridge.xpi` file created.
 4. Select `zotero-mcp-bridge.xpi`
 5. Click **Install Now** if prompted
 6. Restart Zotero if required
-
+azZXz
 Expected: Plugin loads without errors.
 
 ### 1.3 Retrieve Authentication Token

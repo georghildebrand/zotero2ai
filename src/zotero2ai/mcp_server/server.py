@@ -2,7 +2,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
-from zotero2ai.config import resolve_zotero_mcp_token
+from zotero2ai.config import resolve_zotero_bridge_port, resolve_zotero_mcp_token
 from zotero2ai.zotero.collections import ActiveCollectionManager
 from zotero2ai.zotero.plugin_client import PluginClient
 from zotero2ai.zotero.utils import generate_friendly_name
@@ -18,7 +18,10 @@ def create_mcp_server() -> FastMCP:
         token = resolve_zotero_mcp_token()
         if not token:
             raise ValueError("Zotero MCP token not found. Please ensure the Zotero Bridge Plugin is installed and ZOTERO_MCP_TOKEN environment variable is set.")
-        return PluginClient(auth_token=token)
+        
+        port = resolve_zotero_bridge_port()
+        base_url = f"http://127.0.0.1:{port}"
+        return PluginClient(base_url=base_url, auth_token=token)
 
     @mcp.tool()
     def list_collections() -> str:
@@ -33,6 +36,20 @@ def create_mcp_server() -> FastMCP:
                 return "\n".join(lines)
         except Exception as e:
             return f"Error listing collections: {str(e)}"
+
+    @mcp.tool()
+    def search_collections(query: str) -> str:
+        """Search for Zotero collections by name (fuzzy)."""
+        try:
+            with get_client() as client:
+                collections = client.search_collections(query)
+                if not collections:
+                    return f"No collections found matching '{query}'."
+
+                lines = [f"- {c['fullPath']} (key: {c['key']})" for c in collections]
+                return "\n".join(lines)
+        except Exception as e:
+            return f"Error searching collections: {str(e)}"
 
     @mcp.tool()
     def search_papers(query: str) -> str:

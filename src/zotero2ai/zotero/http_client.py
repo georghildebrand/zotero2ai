@@ -29,13 +29,18 @@ class ZoteroHTTPClient:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:23119",
+        base_url: str | None = None,
         token: str | None = None,
         timeout: float = 10.0,
         auth_token: str | None = None,  # Alias for backward compatibility
     ):
         """Initialize the plugin client."""
-        self.base_url = base_url.rstrip("/")
+        if base_url:
+            self.base_url = base_url.rstrip("/")
+        else:
+            port = os.getenv("ZOTERO_BRIDGE_PORT", "23119")
+            self.base_url = f"http://127.0.0.1:{port}"
+        
         self.auth_token = token or auth_token or os.getenv("ZOTERO_MCP_TOKEN")
         self.timeout = timeout
         self._client: httpx.Client | None = None

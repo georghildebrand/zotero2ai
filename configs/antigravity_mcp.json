@@ -10,7 +10,9 @@
                 "run"
             ],
             "env": {
-                "ZOTERO_DATA_DIR": "/Users/georg.hildebrand/Zotero",
+                "ZOTERO_DATA_DIR": "/Users/georg.hildebrand/zotero",
+                "ZOTERO_BRIDGE_PORT": "23120",
+                "ZOTERO_MCP_TOKEN": "<YOUR_TOKEN>",
                 "PATH": "/Users/georg.hildebrand/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
             }
         }

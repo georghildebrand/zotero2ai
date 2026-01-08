@@ -20,7 +20,8 @@ var RequestHandlers = class {
 
         try {
             if (method === "GET" && path === "/health") return this.handleHealth();
-            if (method === "GET" && path === "/collections") return await this.handleGetCollections();
+            if (method === "GET" && path === "/collections") return await this.handleGetCollections(request);
+            if (method === "GET" && path === "/collections/search") return await this.handleSearchCollections(request);
             if (method === "GET" && path.startsWith("/items/search")) return await this.handleSearchItems(request);
             if (method === "GET" && path === "/items/recent") return await this.handleRecentItems(request);
             if (method === "GET" && path === "/notes") return await this.handleGetNotes(request);
@@ -45,9 +46,9 @@ var RequestHandlers = class {
         };
     }
 
-    async handleGetCollections() {
+    async handleGetCollections(request) {
         try {
-            const libraryID = Zotero.Libraries.userLibraryID;
+            const libraryID = request.query.libraryID ? parseInt(request.query.libraryID) : Zotero.Libraries.userLibraryID;
             // Zotero 7: getByLibrary ist synchron, aber sicherheitshalber in try/catch
             const collections = Zotero.Collections.getByLibrary(libraryID);
 
@@ -64,6 +65,39 @@ var RequestHandlers = class {
             return MCPUtils.formatSuccess(result);
         } catch (e) {
             Zotero.debug("MCP Error handleGetCollections: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleSearchCollections(request) {
+        try {
+            const query = (request.query.q || "").toLowerCase();
+            if (!query) return MCPUtils.formatError("Missing 'q' query parameter");
+
+            // We search across all libraries for maximum helpfulness
+            const libraries = Zotero.Libraries.getAll();
+            const result = [];
+
+            for (const lib of libraries) {
+                const collections = Zotero.Collections.getByLibrary(lib.id);
+                for (const col of collections) {
+                    const name = col.name.toLowerCase();
+                    // Simple "fuzzy" match: check if query is sub-sequence or just contains
+                    // Improvement: Levendstein or similar if needed, but contains is a good start.
+                    if (name.includes(query)) {
+                        result.push({
+                            key: col.key,
+                            name: col.name,
+                            parentKey: col.parentKey || null,
+                            fullPath: MCPUtils.getCollectionPath(col),
+                            libraryID: col.libraryID
+                        });
+                    }
+                }
+            }
+            return MCPUtils.formatSuccess(result);
+        } catch (e) {
+            Zotero.debug("MCP Error handleSearchCollections: " + e);
             return { statusCode: 500, body: { error: e.toString() } };
         }
     }

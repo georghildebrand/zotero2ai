@@ -31,15 +31,21 @@ class PluginClient:
     The plugin must be running and the auth token must be configured.
     """
 
-    def __init__(self, base_url: str = "http://127.0.0.1:23119", auth_token: str | None = None, timeout: float = 10.0):
+    def __init__(self, base_url: str | None = None, auth_token: str | None = None, timeout: float = 10.0):
         """Initialize the plugin client.
 
         Args:
-            base_url: Base URL of the plugin HTTP server (default: http://127.0.0.1:23119)
-            auth_token: Bearer token for authentication. If None, must be set via set_auth_token()
+            base_url: Base URL of the plugin HTTP server. If None, uses ZOTERO_BRIDGE_PORT or 23119.
+            auth_token: Bearer token for authentication. If None, must be set via set_auth_token().
             timeout: Request timeout in seconds (default: 10.0)
         """
-        self.base_url = base_url.rstrip("/")
+        if base_url:
+            self.base_url = base_url.rstrip("/")
+        else:
+            import os
+            port = os.getenv("ZOTERO_BRIDGE_PORT", "23119")
+            self.base_url = f"http://127.0.0.1:{port}"
+            
         self.auth_token = auth_token
         self.timeout = timeout
         self._client: httpx.Client | None = None
@@ -150,6 +156,18 @@ class PluginClient:
             List of matching items
         """
         response = self._request("GET", "/items/search", params={"q": query, "limit": limit})
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def search_collections(self, query: str) -> list[dict[str, Any]]:
+        """Search for collections by name (fuzzy).
+
+        Args:
+            query: Search query string
+
+        Returns:
+            List of matching collections
+        """
+        response = self._request("GET", "/collections/search", params={"q": query})
         return cast(list[dict[str, Any]], response.get("data", []))
 
     def get_recent_items(self, limit: int = 5) -> list[dict[str, Any]]:
