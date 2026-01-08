@@ -46,22 +46,37 @@ var RequestHandlers = class {
         };
     }
 
+    // Helper method to recursively collect all collections including subcollections
+    _getAllCollectionsRecursive(collection, result) {
+        // Add current collection
+        result.push({
+            key: collection.key,
+            name: collection.name,
+            parentKey: collection.parentKey || null,
+            fullPath: MCPUtils.getCollectionPath(collection),
+            libraryID: collection.libraryID
+        });
+
+        // Recursively add child collections
+        const children = collection.getChildCollections();
+        for (const child of children) {
+            this._getAllCollectionsRecursive(child, result);
+        }
+    }
+
     async handleGetCollections(request) {
         try {
             const libraryID = request.query.libraryID ? parseInt(request.query.libraryID) : Zotero.Libraries.userLibraryID;
-            // Zotero 7: getByLibrary ist synchron, aber sicherheitshalber in try/catch
-            const collections = Zotero.Collections.getByLibrary(libraryID);
+
+            // Get top-level collections
+            const topLevelCollections = Zotero.Collections.getByLibrary(libraryID);
 
             const result = [];
-            for (const collection of collections) {
-                result.push({
-                    key: collection.key,
-                    name: collection.name,
-                    parentKey: collection.parentKey || null,
-                    fullPath: MCPUtils.getCollectionPath(collection),
-                    libraryID: collection.libraryID
-                });
+            // Recursively collect all collections including subcollections
+            for (const collection of topLevelCollections) {
+                this._getAllCollectionsRecursive(collection, result);
             }
+
             return MCPUtils.formatSuccess(result);
         } catch (e) {
             Zotero.debug("MCP Error handleGetCollections: " + e);
@@ -74,27 +89,26 @@ var RequestHandlers = class {
             const query = (request.query.q || "").toLowerCase();
             if (!query) return MCPUtils.formatError("Missing 'q' query parameter");
 
-            // We search across all libraries for maximum helpfulness
+            // Search across all libraries for maximum helpfulness
             const libraries = Zotero.Libraries.getAll();
-            const result = [];
+            const allCollections = [];
 
+            // Collect all collections (including subcollections) from all libraries
             for (const lib of libraries) {
-                const collections = Zotero.Collections.getByLibrary(lib.id);
-                for (const col of collections) {
-                    const name = col.name.toLowerCase();
-                    // Simple "fuzzy" match: check if query is sub-sequence or just contains
-                    // Improvement: Levendstein or similar if needed, but contains is a good start.
-                    if (name.includes(query)) {
-                        result.push({
-                            key: col.key,
-                            name: col.name,
-                            parentKey: col.parentKey || null,
-                            fullPath: MCPUtils.getCollectionPath(col),
-                            libraryID: col.libraryID
-                        });
-                    }
+                const topLevelCollections = Zotero.Collections.getByLibrary(lib.id);
+                for (const col of topLevelCollections) {
+                    this._getAllCollectionsRecursive(col, allCollections);
                 }
             }
+
+            // Filter by query
+            const result = allCollections.filter(col => {
+                const name = col.name.toLowerCase();
+                const fullPath = col.fullPath.toLowerCase();
+                // Match against both name and full path for better results
+                return name.includes(query) || fullPath.includes(query);
+            });
+
             return MCPUtils.formatSuccess(result);
         } catch (e) {
             Zotero.debug("MCP Error handleSearchCollections: " + e);
