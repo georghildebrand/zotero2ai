@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Attachment file paths in `search_papers` and `get_recent_papers` responses.
+- New `get_item_attachments` tool to retrieve all attachments and file paths for a specific item.
+- New `get_collection_attachments` tool for **batch processing** - retrieve all attachments and file paths for all items in a collection (supports up to 500 items).
+- Support for AI to directly access files found in Zotero library.
+- Added URL support: Tools now return URLs for webpage items and link attachments in addition to file paths.
+- New endpoint `/collections/{key}/items` in the plugin to retrieve all items in a collection.
+
 ## [0.2.0] - 2024-12-30
 
 ### Added

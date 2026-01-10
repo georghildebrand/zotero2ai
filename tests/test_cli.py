@@ -89,7 +89,7 @@ class TestCmdDoctor:
         import respx
         from httpx import Response
 
-        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+        with respx.mock(base_url="http://127.0.0.1:23120") as respx_mock:
             respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
             # Run doctor command
             exit_code = cmd_doctor()
@@ -246,7 +246,7 @@ class TestMain:
         import respx
         from httpx import Response
 
-        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+        with respx.mock(base_url="http://127.0.0.1:23120") as respx_mock:
             respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
             exit_code = main()
             assert exit_code == 0
@@ -283,7 +283,7 @@ class TestMain:
         import respx
         from httpx import Response
 
-        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+        with respx.mock(base_url="http://127.0.0.1:23120") as respx_mock:
             respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
             exit_code = main()
             assert exit_code == 0
@@ -351,7 +351,7 @@ class TestCLIIntegration:
         import respx
         from httpx import Response
 
-        with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+        with respx.mock(base_url="http://127.0.0.1:23120") as respx_mock:
             respx_mock.get("/health").mock(return_value=Response(200, json={"status": "ok", "version": "0.1.0"}))
             exit_code = cmd_doctor()
             assert exit_code == 0

@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server for Zotero with local hybrid search and full CRUD operations for notes.
 
+Note: This is a work in progress and is not yet ready for production use. Also its mostly vibe coded. So please use with care. 
+
 ## Overview
 
 `zotero2ai` allows AI agents to interact with your local Zotero library through a secure HTTP bridge plugin. It provides tools for searching items, reading collections, and performing full CRUD operations on notes.
@@ -53,8 +55,10 @@ export ZOTERO_DATA_DIR="/Users/yourname/Zotero"
 The following tools are exposed to the AI model:
 
 -   `list_collections`: List open Zotero collections.
--   `search_papers`: Search for papers by title.
--   `get_recent_papers`: Retrieve the most recently added items.
+-   `search_papers`: Search for papers by title (includes attachment file paths and URLs).
+-   `get_recent_papers`: Retrieve the most recently added items (includes attachment file paths and URLs).
+-   `get_item_attachments`: Get all attachments and their file paths/URLs for a specific item.
+-   `get_collection_attachments`: **Batch mode** - Get all attachments and file paths/URLs for all items in a collection.
 -   `list_notes`: List notes with generated friendly names (filterable by collection/parent).
 -   `read_note`: specific note content by key.
 -   `create_or_extend_note`: Create a new note or append to an existing one.

@@ -51,11 +51,19 @@ var MCPServer = class {
             scriptableIn.init(input);
 
             let rawData = "";
+            let retryCount = 0;
+            // Wait up to 100ms for data if socket is accepted but nothing is available yet
+            while (retryCount < 5 && scriptableIn.available() === 0) {
+                await new Promise(resolve => setTimeout(resolve, 20));
+                retryCount++;
+            }
+
             if (scriptableIn.available()) {
                 rawData = scriptableIn.read(scriptableIn.available());
             }
 
             if (!rawData) {
+                Zotero.debug("MCPServer: No data received after waiting");
                 input.close();
                 output.close();
                 return;
@@ -145,38 +153,47 @@ var MCPServer = class {
     }
 
     sendResponse(outputStream, responseData) {
-        const statusCode = responseData.statusCode || 200;
-        const statusText = statusCode === 200 ? "OK" : (statusCode === 404 ? "Not Found" : "Result");
+        try {
+            const statusCode = responseData.statusCode || 200;
+            const statusText = statusCode === 200 ? "OK" : (statusCode === 404 ? "Not Found" : "Result");
 
-        let bodyStr = "";
-        if (responseData.body) {
-            bodyStr = typeof responseData.body === 'string' ? responseData.body : JSON.stringify(responseData.body);
+            let bodyStr = "";
+            if (responseData.body) {
+                bodyStr = typeof responseData.body === 'string' ? responseData.body : JSON.stringify(responseData.body);
+            }
+
+            // UTF-8 encoding for content-length
+            const encoder = new TextEncoder();
+            const bodyBytes = encoder.encode(bodyStr);
+
+            let responseHead = `HTTP/1.1 ${statusCode} ${statusText}\r\n`;
+            const headers = responseData.headers || {};
+            headers["Content-Type"] = "application/json; charset=utf-8";
+            headers["Content-Length"] = bodyBytes.length;
+            headers["Connection"] = "close";
+
+            for (const key in headers) {
+                responseHead += `${key}: ${headers[key]}\r\n`;
+            }
+            responseHead += "\r\n";
+
+            const bos = Components.classes["@mozilla.org/binaryoutputstream;1"]
+                .createInstance(Components.interfaces.nsIBinaryOutputStream);
+            bos.setOutputStream(outputStream);
+            bos.writeBytes(responseHead, responseHead.length);
+
+            if (bodyStr) {
+                const converter = Components.classes["@mozilla.org/intl/converter-output-stream;1"]
+                    .createInstance(Components.interfaces.nsIConverterOutputStream);
+                converter.init(outputStream, "UTF-8");
+                converter.writeString(bodyStr);
+                converter.flush();
+                // converter.close() would close outputStream, but we can also rely on bos.close()
+            }
+            bos.close();
+        } catch (e) {
+            Zotero.debug(`MCPServer: Error sending response: ${e}`);
         }
-
-        const encoder = new TextEncoder();
-        const bodyBytes = encoder.encode(bodyStr);
-
-        let responseHead = `HTTP/1.1 ${statusCode} ${statusText}\r\n`;
-
-        const headers = responseData.headers || {};
-        headers["Content-Type"] = "application/json; charset=utf-8";
-        headers["Content-Length"] = bodyBytes.length;
-        headers["Connection"] = "close";
-
-        for (const key in headers) {
-            responseHead += `${key}: ${headers[key]}\r\n`;
-        }
-        responseHead += "\r\n";
-
-        const bos = Components.classes["@mozilla.org/binaryoutputstream;1"]
-            .createInstance(Components.interfaces.nsIBinaryOutputStream);
-        bos.setOutputStream(outputStream);
-
-        bos.writeBytes(responseHead, responseHead.length);
-        if (bodyBytes.length > 0) {
-            bos.writeByteArray(Array.from(bodyBytes), bodyBytes.length);
-        }
-        bos.close();
     }
 
     getCORSHeaders() {

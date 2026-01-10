@@ -16,7 +16,7 @@ This document provides examples for testing the Notes CRUD endpoints implemented
 
 Create a standalone note:
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -27,7 +27,7 @@ curl -X POST http://127.0.0.1:23119/notes \
 
 Create a note attached to an item:
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -39,7 +39,7 @@ curl -X POST http://127.0.0.1:23119/notes \
 
 Create a note in specific collections:
 ```bash
-curl -X POST http://127.0.0.1:23119/notes \
+curl -X POST http://127.0.0.1:23120/notes \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -53,7 +53,7 @@ curl -X POST http://127.0.0.1:23119/notes \
 
 Update note content only:
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X PUT http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -63,7 +63,7 @@ curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 Update tags:
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X PUT http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,7 +73,7 @@ curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 Update multiple fields:
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X PUT http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -85,7 +85,7 @@ curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 Change parent item:
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X PUT http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -95,7 +95,7 @@ curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 Remove parent (make standalone):
 ```bash
-curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X PUT http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -107,7 +107,7 @@ curl -X PUT http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 Get full note content:
 ```bash
-curl -X GET http://127.0.0.1:23119/notes/NOTEXYZ123 \
+curl -X GET http://127.0.0.1:23120/notes/NOTEXYZ123 \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN"
 ```
 
@@ -115,13 +115,13 @@ curl -X GET http://127.0.0.1:23119/notes/NOTEXYZ123 \
 
 List notes in a collection:
 ```bash
-curl -X GET "http://127.0.0.1:23119/notes?collectionKey=COLL1234" \
+curl -X GET "http://127.0.0.1:23120/notes?collectionKey=COLL1234" \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN"
 ```
 
 List notes attached to an item:
 ```bash
-curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
+curl -X GET "http://127.0.0.1:23120/notes?parentItemKey=ITEM5678" \
   -H "Authorization: Bearer $ZOTERO_MCP_TOKEN"
 ```
 
@@ -155,13 +155,13 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 1. **Get a collection key** to test with:
    ```bash
-   curl -X GET http://127.0.0.1:23119/collections \
+   curl -X GET http://127.0.0.1:23120/collections \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" | jq '.data[0].key'
    ```
 
 2. **Create a test note**:
    ```bash
-   NOTE_KEY=$(curl -X POST http://127.0.0.1:23119/notes \
+   NOTE_KEY=$(curl -X POST http://127.0.0.1:23120/notes \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"note": "<p>Test note</p>", "tags": ["test"]}' | jq -r '.data.key')
@@ -170,7 +170,7 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 3. **Update the note**:
    ```bash
-   curl -X PUT http://127.0.0.1:23119/notes/$NOTE_KEY \
+   curl -X PUT http://127.0.0.1:23120/notes/$NOTE_KEY \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"note": "<p>Updated test note</p>", "tags": ["test", "updated"]}'
@@ -178,7 +178,7 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 4. **Read the note back**:
    ```bash
-   curl -X GET http://127.0.0.1:23119/notes/$NOTE_KEY \
+   curl -X GET http://127.0.0.1:23120/notes/$NOTE_KEY \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" | jq
    ```
 
@@ -186,7 +186,7 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 1. **Missing authentication**:
    ```bash
-   curl -X POST http://127.0.0.1:23119/notes \
+   curl -X POST http://127.0.0.1:23120/notes \
      -H "Content-Type: application/json" \
      -d '{"note": "<p>Test</p>"}'
    # Expected: 401 Unauthorized
@@ -194,14 +194,14 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 2. **Invalid note key**:
    ```bash
-   curl -X GET http://127.0.0.1:23119/notes/INVALID \
+   curl -X GET http://127.0.0.1:23120/notes/INVALID \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN"
    # Expected: 404 Not Found
    ```
 
 3. **Missing required field**:
    ```bash
-   curl -X POST http://127.0.0.1:23119/notes \
+   curl -X POST http://127.0.0.1:23120/notes \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"tags": ["test"]}'
@@ -210,7 +210,7 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 4. **Invalid parent item**:
    ```bash
-   curl -X POST http://127.0.0.1:23119/notes \
+   curl -X POST http://127.0.0.1:23120/notes \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"note": "<p>Test</p>", "parentItemKey": "INVALID"}'
@@ -219,7 +219,7 @@ curl -X GET "http://127.0.0.1:23119/notes?parentItemKey=ITEM5678" \
 
 5. **Invalid collection**:
    ```bash
-   curl -X POST http://127.0.0.1:23119/notes \
+   curl -X POST http://127.0.0.1:23120/notes \
      -H "Authorization: Bearer $ZOTERO_MCP_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"note": "<p>Test</p>", "collections": ["INVALID"]}'

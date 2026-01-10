@@ -14,7 +14,7 @@ from zotero2ai.zotero.plugin_client import (
 @pytest.fixture
 def mock_plugin():
     """Mock the plugin HTTP server."""
-    with respx.mock(base_url="http://127.0.0.1:23119") as respx_mock:
+    with respx.mock(base_url="http://127.0.0.1:23120") as respx_mock:
         yield respx_mock
 
 
@@ -27,7 +27,7 @@ def client():
 def test_client_initialization():
     """Test client initialization with default values."""
     client = PluginClient()
-    assert client.base_url == "http://127.0.0.1:23119"
+    assert client.base_url == "http://127.0.0.1:23120"
     assert client.auth_token is None
     assert client.timeout == 10.0
 
@@ -336,5 +336,5 @@ def test_note_not_found(client, mock_plugin):
 
 def test_base_url_trailing_slash_removed():
     """Test that trailing slash is removed from base URL."""
-    client = PluginClient(base_url="http://127.0.0.1:23119/")
-    assert client.base_url == "http://127.0.0.1:23119"
+    client = PluginClient(base_url="http://127.0.0.1:23120/")
+    assert client.base_url == "http://127.0.0.1:23120"

@@ -2,16 +2,27 @@
 
 var MCPUtils = class {
     static getCollectionPath(collection) {
-        // Zotero 7 nutzt Properties, Zotero 6 Methoden. Wir nutzen robust Properties.
-        let path = collection.name || (typeof collection.getName === 'function' ? collection.getName() : "Unknown");
-        let parent = collection.parent || (typeof collection.getParent === 'function' ? collection.getParent() : null);
+        try {
+            let name = collection.name || (typeof collection.getName === 'function' ? collection.getName() : "Unknown");
+            let path = name;
+            let current = collection;
 
-        while (parent) {
-            let parentName = parent.name || (typeof parent.getName === 'function' ? parent.getName() : "Unknown");
-            path = parentName + " / " + path;
-            parent = parent.parent || (typeof parent.getParent === 'function' ? parent.getParent() : null);
+            // Limit recursion depth to prevent infinite loops just in case
+            let depth = 0;
+            while (current.parentKey && depth < 20) {
+                const parent = Zotero.Collections.getByLibraryAndKey(current.libraryID, current.parentKey);
+                if (!parent) break;
+
+                let parentName = parent.name || (typeof parent.getName === 'function' ? parent.getName() : "Unknown");
+                path = parentName + " / " + path;
+                current = parent;
+                depth++;
+            }
+            return path;
+        } catch (e) {
+            Zotero.debug("MCP: Error in getCollectionPath: " + e);
+            return collection.name || "Unknown";
         }
-        return path;
     }
 
     static formatError(message) {

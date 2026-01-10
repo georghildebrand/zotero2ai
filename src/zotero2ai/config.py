@@ -80,12 +80,12 @@ def resolve_zotero_mcp_token() -> str | None:
 
 
 def resolve_zotero_bridge_port() -> int:
-    """Resolve the Zotero Bridge port from ZOTERO_BRIDGE_PORT or use default 23119."""
-    port_str = os.getenv("ZOTERO_BRIDGE_PORT", "23119")
+    """Resolve the Zotero Bridge port from ZOTERO_BRIDGE_PORT or use default 23120."""
+    port_str = os.getenv("ZOTERO_BRIDGE_PORT", "23120")
     try:
         return int(port_str)
     except ValueError:
-        return 23119
+        return 23120
 
 
 def validate_zotero_data_dir(data_dir: Path) -> None:

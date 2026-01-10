@@ -35,7 +35,7 @@ class PluginClient:
         """Initialize the plugin client.
 
         Args:
-            base_url: Base URL of the plugin HTTP server. If None, uses ZOTERO_BRIDGE_PORT or 23119.
+            base_url: Base URL of the plugin HTTP server. If None, uses ZOTERO_BRIDGE_PORT or 23120.
             auth_token: Bearer token for authentication. If None, must be set via set_auth_token().
             timeout: Request timeout in seconds (default: 10.0)
         """
@@ -43,7 +43,7 @@ class PluginClient:
             self.base_url = base_url.rstrip("/")
         else:
             import os
-            port = os.getenv("ZOTERO_BRIDGE_PORT", "23119")
+            port = os.getenv("ZOTERO_BRIDGE_PORT", "23120")
             self.base_url = f"http://127.0.0.1:{port}"
             
         self.auth_token = auth_token
@@ -136,26 +136,39 @@ class PluginClient:
         """
         return self._request("GET", "/health")
 
-    def get_collections(self) -> list[dict[str, Any]]:
-        """Get all Zotero collections.
+    def get_collections(self, parent_key: str | None = None) -> list[dict[str, Any]]:
+        """Get Zotero collections.
+
+        Args:
+            parent_key: Optional key to filter by. Use 'root' for top-level collections.
 
         Returns:
             List of collection objects with keys, names, and paths
         """
-        response = self._request("GET", "/collections")
+        params = {}
+        if parent_key:
+            params["parentKey"] = parent_key
+        response = self._request("GET", "/collections", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
-    def search_items(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Search for items by title.
+    def search_items(self, query: str | None = None, tag: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        """Search for items by title or tag.
 
         Args:
-            query: Search query string
+            query: Search query string (optional)
+            tag: Tag to search for (optional)
             limit: Maximum number of results (default: 10)
 
         Returns:
             List of matching items
         """
-        response = self._request("GET", "/items/search", params={"q": query, "limit": limit})
+        params: dict[str, Any] = {"limit": limit}
+        if query:
+            params["q"] = query
+        if tag:
+            params["tag"] = tag
+            
+        response = self._request("GET", "/items/search", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
     def search_collections(self, query: str) -> list[dict[str, Any]]:
@@ -180,6 +193,19 @@ class PluginClient:
             List of recent items sorted by date added
         """
         response = self._request("GET", "/items/recent", params={"limit": limit})
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def get_collection_items(self, collection_key: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Get all items in a collection with their attachments.
+
+        Args:
+            collection_key: The key of the collection
+            limit: Maximum number of items to return (default: 100, max: 500)
+
+        Returns:
+            List of items with their attachments and file paths
+        """
+        response = self._request("GET", f"/collections/{collection_key}/items", params={"limit": limit})
         return cast(list[dict[str, Any]], response.get("data", []))
 
     def get_notes(self, collection_key: str | None = None, parent_item_key: str | None = None) -> list[dict[str, Any]]:
@@ -259,6 +285,7 @@ class PluginClient:
         tags: list[str] | None = None,
         collections: list[str] | None = None,
         parent_item_key: str | None = None,
+        related: list[str] | None = None,
     ) -> dict[str, Any]:
         """Update an existing note."""
         body: dict[str, Any] = {}
@@ -271,6 +298,8 @@ class PluginClient:
             body["collections"] = collections
         if parent_item_key is not None:
             body["parentItemKey"] = parent_item_key
+        if related is not None:
+            body["related"] = related
 
         response = self._request("PUT", f"/notes/{key}", json=body)
         return cast(dict[str, Any], response.get("data", {}))
@@ -294,3 +323,34 @@ class PluginClient:
 
         # Update the note
         return self.update_note(key, content=new_content)
+
+    def get_tags(self, library_id: int | None = None) -> list[str]:
+        """Get all tags in a library.
+
+        Args:
+            library_id: Library ID to get tags from (optional)
+
+        Returns:
+            List of tags
+        """
+        params = {}
+        if library_id:
+            params["libraryID"] = library_id
+        response = self._request("GET", "/tags", params=params)
+        return cast(list[str], response.get("data", []))
+
+    def rename_tag(self, old_name: str, new_name: str, library_id: int | None = None) -> dict[str, Any]:
+        """Rename a tag library-wide.
+
+        Args:
+            old_name: Current name of the tag
+            new_name: New name for the tag
+            library_id: Library ID (optional)
+
+        Returns:
+            Success status
+        """
+        body = {"oldName": old_name, "newName": new_name}
+        if library_id:
+            body["libraryID"] = library_id
+        return self._request("POST", "/tags/rename", json=body)

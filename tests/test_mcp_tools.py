@@ -30,7 +30,7 @@ def env_vars(mock_token):
 @pytest.mark.asyncio
 async def test_tool_list_collections(mcp, env_vars):
     """Test list_collections tool."""
-    respx.get("http://127.0.0.1:23119/collections").mock(
+    respx.get("http://127.0.0.1:23120/collections").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -50,7 +50,7 @@ async def test_tool_list_collections(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_search_papers(mcp, env_vars):
     """Test search_papers tool."""
-    respx.get("http://127.0.0.1:23119/items/search").mock(
+    respx.get("http://127.0.0.1:23120/items/search").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -77,7 +77,7 @@ async def test_tool_search_papers(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_get_recent_papers(mcp, env_vars):
     """Test get_recent_papers tool."""
-    respx.get("http://127.0.0.1:23119/items/recent").mock(
+    respx.get("http://127.0.0.1:23120/items/recent").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -102,7 +102,7 @@ async def test_tool_get_recent_papers(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_list_notes(mcp, env_vars):
     """Test list_notes tool."""
-    respx.get("http://127.0.0.1:23119/notes").mock(
+    respx.get("http://127.0.0.1:23120/notes").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -128,7 +128,7 @@ async def test_tool_list_notes(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_read_note(mcp, env_vars):
     """Test read_note tool."""
-    respx.get("http://127.0.0.1:23119/notes/N1").mock(
+    respx.get("http://127.0.0.1:23120/notes/N1").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -150,7 +150,7 @@ async def test_tool_read_note(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_create_note(mcp, env_vars):
     """Test create_or_extend_note tool (creation)."""
-    respx.post("http://127.0.0.1:23119/notes").mock(
+    respx.post("http://127.0.0.1:23120/notes").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -169,7 +169,7 @@ async def test_tool_create_note(mcp, env_vars):
 async def test_tool_extend_note(mcp, env_vars):
     """Test create_or_extend_note tool (extension)."""
     # 1. Mock GET current note
-    respx.get("http://127.0.0.1:23119/notes/N1").mock(
+    respx.get("http://127.0.0.1:23120/notes/N1").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -180,7 +180,7 @@ async def test_tool_extend_note(mcp, env_vars):
     )
 
     # 2. Mock PUT updated note
-    respx.put("http://127.0.0.1:23119/notes/N1").mock(
+    respx.put("http://127.0.0.1:23120/notes/N1").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -198,7 +198,7 @@ async def test_tool_extend_note(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_list_notes_active_collection(mcp, env_vars):
     """Test list_notes tool using active collection."""
-    respx.get("http://127.0.0.1:23119/notes").mock(
+    respx.get("http://127.0.0.1:23120/notes").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -224,7 +224,7 @@ async def test_tool_list_notes_active_collection(mcp, env_vars):
 @pytest.mark.asyncio
 async def test_tool_create_note_active_collection(mcp, env_vars):
     """Test create_or_extend_note tool using active collection (creation)."""
-    respx.post("http://127.0.0.1:23119/notes").mock(
+    respx.post("http://127.0.0.1:23120/notes").mock(
         return_value=httpx.Response(
             201,
             json={

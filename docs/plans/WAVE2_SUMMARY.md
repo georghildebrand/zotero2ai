@@ -36,7 +36,7 @@
 
 **Features**:
 - ✅ `MCPServer` class with full HTTP server implementation
-- ✅ Binds to `127.0.0.1:23119` (loopback only for security)
+- ✅ Binds to `127.0.0.1:23120` (loopback only for security)
 - ✅ Proper UTF-8 body reading using `Content-Length` header (NOT `available()`)
 - ✅ UTF-8 Content-Length calculation using byte length
 - ✅ `Connection: close` header on all responses

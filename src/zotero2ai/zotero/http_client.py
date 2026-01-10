@@ -31,14 +31,14 @@ class ZoteroHTTPClient:
         self,
         base_url: str | None = None,
         token: str | None = None,
-        timeout: float = 10.0,
+        timeout: float = 30.0,
         auth_token: str | None = None,  # Alias for backward compatibility
     ):
         """Initialize the plugin client."""
         if base_url:
             self.base_url = base_url.rstrip("/")
         else:
-            port = os.getenv("ZOTERO_BRIDGE_PORT", "23119")
+            port = os.getenv("ZOTERO_BRIDGE_PORT", "23120")
             self.base_url = f"http://127.0.0.1:{port}"
         
         self.auth_token = token or auth_token or os.getenv("ZOTERO_MCP_TOKEN")
@@ -106,14 +106,18 @@ class ZoteroHTTPClient:
         return self._request("GET", "/health")
 
     # Collections
-    def list_collections(self) -> list[dict[str, Any]]:
-        """List all Zotero collections."""
-        response = self._request("GET", "/collections")
+    def list_collections(self, parent_key: str | None = None) -> list[dict[str, Any]]:
+        """List Zotero collections, optionally filtering by parent."""
+        params = {}
+        if parent_key:
+            params["parentKey"] = parent_key
+
+        response = self._request("GET", "/collections", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
-    def get_collections(self) -> list[dict[str, Any]]:
+    def get_collections(self, parent_key: str | None = None) -> list[dict[str, Any]]:
         """Alias for list_collections."""
-        return self.list_collections()
+        return self.list_collections(parent_key=parent_key)
 
     # Items
     def search_items(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -210,6 +214,39 @@ class ZoteroHTTPClient:
         current_content = current_note.get("note", "")
         new_content = current_content + "\n" + additional_content
         return self.update_note(key, note=new_content)
+
+    # Tags
+    def get_tags(self, library_id: int | None = None) -> list[str]:
+        """Get all tags in a library.
+        
+        Args:
+            library_id: Library ID to get tags from (optional)
+            
+        Returns:
+            List of tag names
+        """
+        params = {}
+        if library_id:
+            params["libraryID"] = library_id
+        response = self._request("GET", "/tags", params=params)
+        return cast(list[str], response.get("data", []))
+
+    def rename_tag(self, old_name: str, new_name: str, library_id: int | None = None) -> dict[str, Any]:
+        """Rename a tag library-wide.
+        
+        Args:
+            old_name: Current tag name
+            new_name: New tag name
+            library_id: Library ID (optional, applies to all libraries if not specified)
+            
+        Returns:
+            Success response
+        """
+        body: dict[str, Any] = {"oldName": old_name, "newName": new_name}
+        if library_id:
+            body["libraryID"] = library_id
+        response = self._request("POST", "/tags/rename", json=body)
+        return cast(dict[str, Any], response.get("data", {}))
 
 
 PluginClient = ZoteroHTTPClient
