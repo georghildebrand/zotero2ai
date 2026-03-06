@@ -21,16 +21,19 @@ var RequestHandlers = class {
         try {
             if (method === "GET" && path === "/health") return this.handleHealth();
             if (method === "GET" && path === "/collections") return await this.handleGetCollections(request);
+            if (method === "GET" && path === "/collections/tree") return await this.handleGetCollectionTree(request);
             if (method === "GET" && path === "/collections/search") return await this.handleSearchCollections(request);
             if (method === "GET" && path.match(/^\/collections\/[A-Z0-9]+\/items$/)) return await this.handleGetCollectionItems(request);
             if (method === "GET" && path.startsWith("/items/search")) return await this.handleSearchItems(request);
             if (method === "GET" && path === "/items/recent") return await this.handleRecentItems(request);
+            if (method === "GET" && path.match(/^\/items\/[A-Z0-9]+$/)) return await this.handleGetItem(request);
             if (method === "GET" && path === "/notes") return await this.handleGetNotes(request);
             if (method === "GET" && path.match(/^\/notes\/[A-Z0-9]+$/)) return await this.handleGetNote(request);
             if (method === "POST" && path === "/notes") return await this.handleCreateNote(request);
             if (method === "PUT" && path.match(/^\/notes\/[A-Z0-9]+$/)) return await this.handleUpdateNote(request);
             if (method === "GET" && path === "/tags") return await this.handleGetTags(request);
             if (method === "POST" && path === "/tags/rename") return await this.handleRenameTag(request);
+            if (method === "GET" && path.match(/^\/items\/[A-Z0-9]+\/content$/)) return await this.handleGetItemContent(request);
 
             return {
                 statusCode: 404,
@@ -61,15 +64,116 @@ var RequestHandlers = class {
         };
     }
 
-    // Helper method to recursively collect all collections including subcollections
-    _getAllCollectionsRecursive(collection, result) {
-        // Add current collection
-        result.push(this._formatCollection(collection));
+    // SAFE DATA ACCESS HELPERS
+    _safeGetTags(item) {
+        try {
+            if (typeof item.getTags === 'function') {
+                const tags = item.getTags();
+                return Array.isArray(tags) ? tags.map(t => t.tag || t) : [];
+            }
+            return [];
+        } catch (e) {
+            Zotero.debug(`MCP: Error getting tags for item ${item.key}: ${e}`);
+            return [];
+        }
+    }
 
-        // Recursively add child collections
-        const children = collection.getChildCollections();
-        for (const child of children) {
-            this._getAllCollectionsRecursive(child, result);
+    _safeGetField(item, fieldName, defaultValue = '') {
+        try {
+            if (typeof item.getField === 'function') {
+                return item.getField(fieldName) || defaultValue;
+            }
+            return defaultValue;
+        } catch (e) {
+            Zotero.debug(`MCP: Error getting field '${fieldName}' for item ${item.key}: ${e}`);
+            return defaultValue;
+        }
+    }
+
+    _safeGetCreators(item) {
+        try {
+            if (typeof item.getCreators === 'function') {
+                const creators = item.getCreators();
+                return creators.map(c =>
+                    c.firstName ? `${c.lastName}, ${c.firstName}` : c.lastName
+                );
+            }
+            return [];
+        } catch (e) {
+            Zotero.debug(`MCP: Error getting creators for item ${item.key}: ${e}`);
+            return [];
+        }
+    }
+
+    async _safeGetAttachments(item) {
+        try {
+            if (typeof item.getAttachments !== 'function') {
+                return [];
+            }
+
+            const attachmentIDs = item.getAttachments();
+            const attachments = [];
+
+            for (const attachmentID of attachmentIDs) {
+                try {
+                    const attachment = await Zotero.Items.getAsync(attachmentID);
+                    if (attachment && attachment.isAttachment()) {
+                        const filePath = await attachment.getFilePathAsync();
+                        const attachmentUrl = this._safeGetField(attachment, 'url');
+
+                        if (filePath || attachmentUrl) {
+                            attachments.push({
+                                key: attachment.key,
+                                title: this._safeGetField(attachment, 'title', 'Untitled'),
+                                contentType: attachment.attachmentContentType || 'link',
+                                path: filePath || '',
+                                url: attachmentUrl || ''
+                            });
+                        }
+                    }
+                } catch (e) {
+                    Zotero.debug(`MCP: Error getting attachment ${attachmentID}: ${e}`);
+                    // Continue with other attachments
+                }
+            }
+
+            return attachments;
+        } catch (e) {
+            Zotero.debug(`MCP: Error getting attachments for item ${item.key}: ${e}`);
+            return [];
+        }
+    }
+
+    // Helper method to robusly get ALL collections (flat list) ensuring we hit deep nodes
+    _getAllCollectionsFlat(libraryID) {
+        try {
+            const allMap = new Map();
+            // Start with what Zotero gives us (might be just roots, might be all)
+            const initial = Zotero.Collections.getByLibrary(libraryID);
+
+            // Use a stack for iterative traversal to avoid recursion limits
+            const stack = [...initial];
+
+            while (stack.length > 0) {
+                const col = stack.pop();
+                if (!col) continue;
+
+                // Add to map if not present
+                if (!allMap.has(col.key)) {
+                    allMap.set(col.key, col);
+
+                    // Always check for children to be safe
+                    const children = col.getChildCollections();
+                    for (const child of children) {
+                        stack.push(child);
+                    }
+                }
+            }
+
+            return Array.from(allMap.values());
+        } catch (e) {
+            Zotero.debug("MCP Error _getAllCollectionsFlat: " + e);
+            return [];
         }
     }
 
@@ -78,36 +182,39 @@ var RequestHandlers = class {
         try {
             const libraryIDParam = request.query.libraryID;
             const parentKey = request.query.parentKey;
+            const limit = parseInt(request.query.limit || "100");
+            const start = parseInt(request.query.start || "0");
+            const sort = request.query.sort || "title"; // Default sort by title
 
             let result = [];
+            let allCollections = [];
 
+            // First, gather ALL collections (no pagination at Zotero API level needed
+            // because getByLibrary() returns everything)
             if (parentKey === 'root') {
-                // Return only top-level (root) collections from specified or all libraries
                 if (libraryIDParam) {
-                    const allCollections = Zotero.Collections.getByLibrary(parseInt(libraryIDParam));
-                    for (const collection of allCollections) {
+                    const collections = Zotero.Collections.getByLibrary(parseInt(libraryIDParam));
+                    for (const collection of collections) {
                         if (!collection.parentKey) {
-                            result.push(this._formatCollection(collection));
+                            allCollections.push(collection);
                         }
                     }
                 } else {
                     const libraries = Zotero.Libraries.getAll();
                     for (const lib of libraries) {
-                        const allCollections = Zotero.Collections.getByLibrary(lib.id);
-                        for (const collection of allCollections) {
+                        const collections = Zotero.Collections.getByLibrary(lib.id);
+                        for (const collection of collections) {
                             if (!collection.parentKey) {
-                                result.push(this._formatCollection(collection));
+                                allCollections.push(collection);
                             }
                         }
                     }
                 }
             } else if (parentKey) {
-                // Return direct children of specific collection
                 let parent = null;
                 if (libraryIDParam) {
                     parent = Zotero.Collections.getByLibraryAndKey(parseInt(libraryIDParam), parentKey);
                 } else {
-                    // Search across all libraries for the parentKey
                     const libraries = Zotero.Libraries.getAll();
                     for (const lib of libraries) {
                         parent = Zotero.Collections.getByLibraryAndKey(lib.id, parentKey);
@@ -116,37 +223,54 @@ var RequestHandlers = class {
                 }
 
                 if (!parent) return MCPUtils.formatError(`Collection '${parentKey}' not found`);
-
-                const children = parent.getChildCollections();
-                Zotero.debug(`MCP: Found ${children.length} children for parent ${parentKey}`);
-
-                for (const child of children) {
-                    result.push(this._formatCollection(child));
-                }
+                allCollections = parent.getChildCollections();
             } else {
-                // List all collections across all libraries or just one
-                // FIX: Zotero.Collections.getByLibrary returns ALL collections flatly. 
-                // We should NOT recurse here, otherwise we create duplicates (N*Depth).
+                // All collections
                 if (libraryIDParam) {
-                    const allCollections = Zotero.Collections.getByLibrary(parseInt(libraryIDParam));
-                    Zotero.debug(`MCP: Found ${allCollections.length} collections in library ${libraryIDParam}`);
-                    for (const col of allCollections) {
-                        result.push(this._formatCollection(col));
-                    }
+                    allCollections = this._getAllCollectionsFlat(parseInt(libraryIDParam));
                 } else {
                     const libraries = Zotero.Libraries.getAll();
                     for (const lib of libraries) {
-                        const allCollections = Zotero.Collections.getByLibrary(lib.id);
-                        Zotero.debug(`MCP: Found ${allCollections.length} collections in library ${lib.id}`);
-                        for (const col of allCollections) {
-                            result.push(this._formatCollection(col));
-                        }
+                        const collections = this._getAllCollectionsFlat(lib.id);
+                        allCollections = allCollections.concat(collections);
                     }
                 }
             }
 
-            Zotero.debug(`MCP: Returning ${result.length} collections`);
-            return MCPUtils.formatSuccess(result);
+            // Sort collections
+            allCollections.sort((a, b) => {
+                if (sort === 'title' || sort === 'name') {
+                    return a.name.localeCompare(b.name);
+                } else if (sort === 'dateAdded') {
+                    return new Date(b.dateAdded) - new Date(a.dateAdded);
+                }
+                return 0;
+            });
+
+            // Apply pagination
+            const total = allCollections.length;
+            const paginatedCollections = allCollections.slice(start, start + limit);
+
+            // Format results
+            for (const col of paginatedCollections) {
+                result.push(this._formatCollection(col));
+            }
+
+            Zotero.debug(`MCP: Returning ${result.length} of ${total} collections (start=${start}, limit=${limit})`);
+
+            return {
+                statusCode: 200,
+                body: {
+                    success: true,
+                    data: result,
+                    pagination: {
+                        total: total,
+                        start: start,
+                        limit: limit,
+                        hasMore: (start + limit) < total
+                    }
+                }
+            };
         } catch (e) {
             Zotero.debug("MCP Error handleGetCollections: " + e);
             return { statusCode: 500, body: { error: e.toString() } };
@@ -155,29 +279,41 @@ var RequestHandlers = class {
 
     async handleSearchCollections(request) {
         try {
-            const query = (request.query.q || "").toLowerCase();
+            const query = (request.query.q || "").trim();
             if (!query) return MCPUtils.formatError("Missing 'q' query parameter");
 
-            // Search across all libraries for maximum helpfulness
+            const minScore = parseInt(request.query.minScore || "200"); // Lowered from 300
+            const limit = parseInt(request.query.limit || "50");
+
+            // Search across all libraries
             const libraries = Zotero.Libraries.getAll();
             const allCollectionsResult = [];
 
-            // Collect all collections from all libraries
-            // FIX: No recursion needed, getByLibrary is already flat
             for (const lib of libraries) {
-                const allCollections = Zotero.Collections.getByLibrary(lib.id);
+                const allCollections = this._getAllCollectionsFlat(lib.id);
                 for (const col of allCollections) {
-                    allCollectionsResult.push(this._formatCollection(col));
+                    const formatted = this._formatCollection(col);
+                    const score = MCPUtils.fuzzyMatchScore(query, formatted.name, formatted.fullPath);
+
+                    // DEBUG: Log all scores for troubleshooting
+                    if (score > 0) {
+                        Zotero.debug(`MCP Search: "${formatted.name}" (${formatted.fullPath}) scored ${score} for query "${query}"`);
+                    }
+
+                    if (score >= minScore) {
+                        formatted.matchScore = score;
+                        allCollectionsResult.push(formatted);
+                    }
                 }
             }
 
-            // Filter by query
-            const result = allCollectionsResult.filter(col => {
-                const name = col.name.toLowerCase();
-                const fullPath = col.fullPath.toLowerCase();
-                // Match against both name and full path for better results
-                return name.includes(query) || fullPath.includes(query);
-            });
+            // Sort by score (highest first)
+            allCollectionsResult.sort((a, b) => b.matchScore - a.matchScore);
+
+            // Apply limit
+            const result = allCollectionsResult.slice(0, limit);
+
+            Zotero.debug(`MCP: Search for "${query}" found ${result.length} collections (${allCollectionsResult.length} total matches, minScore=${minScore})`);
 
             return MCPUtils.formatSuccess(result);
         } catch (e) {
@@ -234,10 +370,11 @@ var RequestHandlers = class {
         try {
             const searchQuery = request.query.q || "";
             const tag = request.query.tag || "";
+            const collectionKey = request.query.collectionKey || "";
             const limit = parseInt(request.query.limit || "10");
             const libraryIDParam = request.query.libraryID;
 
-            if (!searchQuery && !tag) return MCPUtils.formatError("Missing 'q' or 'tag' query parameter");
+            if (!searchQuery && !tag && !collectionKey) return MCPUtils.formatError("Missing 'q', 'tag', or 'collectionKey' query parameter");
 
             const libraries = libraryIDParam ? [{ id: parseInt(libraryIDParam) }] : Zotero.Libraries.getAll();
             let allItemIDs = [];
@@ -252,6 +389,10 @@ var RequestHandlers = class {
 
                 if (tag) {
                     s.addCondition('tag', 'is', tag);
+                }
+
+                if (collectionKey) {
+                    s.addCondition('collection', 'is', collectionKey);
                 }
 
                 s.addCondition('itemType', 'isNot', 'attachment');
@@ -378,7 +519,7 @@ var RequestHandlers = class {
             return MCPUtils.formatSuccess({
                 key: note.key,
                 note: note.getNote(),
-                tags: note.getTags().map(t => t.tag),
+                tags: this._safeGetTags(note),
                 parentItemKey: note.parentItemKey || null,
                 collections: note.getCollections(),
                 related: await this._getRelatedKeys(note),
@@ -521,51 +662,50 @@ var RequestHandlers = class {
         } else {
             const validIDs = itemIDsOrItems.filter(id => id && !isNaN(id));
             if (validIDs.length === 0) return MCPUtils.formatSuccess([]);
-            items = await Zotero.Items.getAsync(validIDs);
+            try {
+                items = await Zotero.Items.getAsync(validIDs);
+            } catch (e) {
+                Zotero.debug(`MCP: Error loading items: ${e}`);
+                return MCPUtils.formatSuccess([]);
+            }
         }
 
         const result = [];
         for (const item of items) {
             if (!item) continue;
-            const creators = item.getCreators().map(c => c.firstName ? `${c.lastName}, ${c.firstName}` : c.lastName);
 
-            // Get attachment file paths and URLs
-            const attachments = [];
-            const attachmentIDs = item.getAttachments();
-            for (const attachmentID of attachmentIDs) {
-                try {
-                    const attachment = await Zotero.Items.getAsync(attachmentID);
-                    if (attachment && attachment.isAttachment()) {
-                        const filePath = await attachment.getFilePathAsync();
-                        const attachmentUrl = attachment.getField('url');
+            try {
+                // Use safe helpers for all properties
+                const creators = this._safeGetCreators(item);
+                const tags = this._safeGetTags(item);
+                const attachments = await this._safeGetAttachments(item);
+                const related = await this._getRelatedKeys(item);
+                const title = this._safeGetField(item, 'title', '');
+                const url = this._safeGetField(item, 'url', '');
+                const date = this._safeGetField(item, 'date', '');
+                const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
 
-                        if (filePath || attachmentUrl) {
-                            attachments.push({
-                                key: attachment.key,
-                                title: attachment.getField('title') || 'Untitled',
-                                contentType: attachment.attachmentContentType || 'link',
-                                path: filePath || '',
-                                url: attachmentUrl || ''
-                            });
-                        }
-                    }
-                } catch (e) {
-                    Zotero.debug(`Error getting attachment ${attachmentID}: ${e}`);
-                }
+                result.push({
+                    key: item.key,
+                    itemType: itemType,
+                    title: title,
+                    url: url,
+                    creators: creators,
+                    date: date,
+                    tags: tags,
+                    collections: item.getCollections(), // getCollections usually safe, returns array of keys
+                    related: related,
+                    attachments: attachments
+                });
+            } catch (e) {
+                Zotero.debug(`MCP: Error formatting item ${item.key}: ${e}`);
+                // Graceful degradation: return minimal info with error
+                result.push({
+                    key: item.key,
+                    error: "Failed to format item",
+                    details: e.toString()
+                });
             }
-
-            result.push({
-                key: item.key,
-                itemType: Zotero.ItemTypes.getName(item.itemTypeID),
-                title: item.getField('title') || '',
-                url: item.getField('url') || '',
-                creators: creators,
-                date: item.getField('date') || '',
-                tags: item.getTags().map(t => t.tag),
-                collections: item.getCollections(),
-                related: await this._getRelatedKeys(item),
-                attachments: attachments
-            });
         }
         return MCPUtils.formatSuccess(result);
     }
@@ -579,22 +719,37 @@ var RequestHandlers = class {
         } else {
             const validIDs = noteIDsOrItems.filter(id => id && !isNaN(id));
             if (validIDs.length === 0) return MCPUtils.formatSuccess([]);
-            notes = await Zotero.Items.getAsync(validIDs);
+            try {
+                notes = await Zotero.Items.getAsync(validIDs);
+            } catch (e) {
+                Zotero.debug(`MCP: Error loading notes: ${e}`);
+                return MCPUtils.formatSuccess([]);
+            }
         }
 
         const result = [];
         for (const note of notes) {
             if (!note) continue;
-            result.push({
-                key: note.key,
-                note: note.getNote(),
-                tags: note.getTags().map(t => t.tag),
-                parentItemKey: note.parentItemKey || null,
-                collections: note.getCollections(),
-                related: await this._getRelatedKeys(note),
-                dateAdded: note.dateAdded,
-                dateModified: note.dateModified
-            });
+
+            try {
+                result.push({
+                    key: note.key,
+                    note: note.getNote(),
+                    tags: this._safeGetTags(note),
+                    parentItemKey: note.parentItemKey || null,
+                    collections: note.getCollections(),
+                    related: await this._getRelatedKeys(note),
+                    dateAdded: note.dateAdded,
+                    dateModified: note.dateModified
+                });
+            } catch (e) {
+                Zotero.debug(`MCP: Error formatting note ${note.key}: ${e}`);
+                result.push({
+                    key: note.key,
+                    error: "Failed to format note",
+                    details: e.toString()
+                });
+            }
         }
         return MCPUtils.formatSuccess(result);
     }
@@ -645,6 +800,227 @@ var RequestHandlers = class {
             return MCPUtils.formatSuccess({ success: true, oldName, newName });
         } catch (e) {
             return { statusCode: 500, body: { error: e.message } };
+        }
+    }
+
+    async handleGetItemContent(request) {
+        try {
+            const key = request.path.split('/')[2];
+            const libraryIDParam = request.query.libraryID;
+
+            let item = null;
+            if (libraryIDParam) {
+                item = Zotero.Items.getByLibraryAndKey(parseInt(libraryIDParam), key);
+            } else {
+                const libraries = Zotero.Libraries.getAll();
+                for (const lib of libraries) {
+                    item = Zotero.Items.getByLibraryAndKey(lib.id, key);
+                    if (item) break;
+                }
+            }
+
+            if (!item) return { statusCode: 404, body: { error: "Item not found" } };
+
+            // If it's a note, return its content directly
+            if (item.isNote()) {
+                return MCPUtils.formatSuccess({
+                    key: item.key,
+                    parentKey: item.parentItemKey || null,
+                    filename: "Note.html",
+                    contentType: "text/html",
+                    content: item.getNote()
+                });
+            }
+
+            let content = "";
+            let contentType = "text/plain";
+            let filename = "";
+            let sourceKey = item.key;
+
+            // If it's a regular item (paper), try to find the best attachment
+            if (item.isRegularItem()) {
+                const attachmentIDs = item.getAttachments();
+                let bestAttachment = null;
+
+                // Prefer PDF, then HTML/Snapshot
+                for (const id of attachmentIDs) {
+                    const att = await Zotero.Items.getAsync(id);
+                    if (!att) continue;
+
+                    if (att.attachmentContentType === 'application/pdf') {
+                        bestAttachment = att;
+                        break; // Found PDF, stop looking
+                    } else if (att.attachmentContentType === 'text/html' && !bestAttachment) {
+                        bestAttachment = att;
+                    }
+                }
+
+                if (bestAttachment) {
+                    item = bestAttachment; // Switch context to attachment
+                    sourceKey = item.key;
+                } else {
+                    return MCPUtils.formatError("No suitable attachment found for this item");
+                }
+            }
+
+            // Now processing the attachment item
+            filename = item.attachmentFilename;
+            contentType = item.attachmentContentType || "application/octet-stream";
+
+            // 1. Try Zotero Fulltext (for PDFs especially)
+            try {
+                if (Zotero.Fulltext && Zotero.Fulltext.getItemText) {
+                    const ft = await Zotero.Fulltext.getItemText(item.id);
+                    if (ft) {
+                        // ft might be a string or an object depending on version
+                        // In recent versions, it returns just the text string or false
+                        if (typeof ft === 'string') {
+                            content = ft;
+                        } else if (ft.text) {
+                            content = ft.text;
+                        }
+                    }
+                }
+            } catch (e) {
+                Zotero.debug("MCP: Fulltext lookup failed: " + e);
+            }
+
+            // 2. If no fulltext yet, and it's a file we can read
+            if (!content && (contentType === 'text/html' || contentType === 'text/plain' || filename.endsWith(".html") || filename.endsWith(".txt") || filename.endsWith(".md"))) {
+                const filePath = await item.getFilePathAsync();
+                if (filePath) {
+                    // Use IOUtils (Zotero 7)
+                    if (typeof IOUtils !== 'undefined') {
+                        content = await IOUtils.readUTF8(filePath);
+                        // Basic cleanup for HTML if needed, but returning raw HTML is fine for AI
+                    } else if (typeof OS !== 'undefined' && OS.File) {
+                        // Zotero 6 fallback
+                        const decoder = new TextDecoder();
+                        content = decoder.decode(await OS.File.read(filePath));
+                    }
+                }
+            }
+
+            if (!content) {
+                return {
+                    statusCode: 404,
+                    body: {
+                        error: "Content not available",
+                        message: "Could not extract text. Item might not be indexed or format is unsupported."
+                    }
+                };
+            }
+
+            return MCPUtils.formatSuccess({
+                key: sourceKey,
+                parentKey: item.parentItemKey,
+                filename: filename,
+                contentType: contentType,
+                content: content
+            });
+
+        } catch (e) {
+            Zotero.debug("MCP Error handleGetItemContent: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleGetCollectionTree(request) {
+        try {
+            const libraryIDParam = request.query.libraryID;
+            const depth = parseInt(request.query.depth || "99"); // Default to deep
+
+            // Get roots first
+            let rootCollections = [];
+            if (libraryIDParam) {
+                const libID = parseInt(libraryIDParam);
+                const allCols = Zotero.Collections.getByLibrary(libID);
+                rootCollections = allCols.filter(c => !c.parentKey);
+            } else {
+                const libraries = Zotero.Libraries.getAll();
+                for (const lib of libraries) {
+                    const allCols = Zotero.Collections.getByLibrary(lib.id);
+                    rootCollections = rootCollections.concat(allCols.filter(c => !c.parentKey));
+                }
+            }
+
+            // Recursive formatter
+            const buildTree = (collection, currentDepth) => {
+                const node = {
+                    key: collection.key,
+                    name: collection.name,
+                    items: []
+                };
+
+                // Add children if depth allows
+                if (currentDepth < depth) {
+                    const children = collection.getChildCollections();
+                    node.children = children.map(c => buildTree(c, currentDepth + 1));
+
+                    // Optimization: Do NOT fetch items for every collection in the tree unless requested?
+                    // The user said "return a nested JSON with Sub-Collections and Items".
+                    // Fetching items for EVERY collection might be heavy. 
+                    // Let's include item counts at least, or maybe lightweight item list.
+                    // For now, let's keep it to structure (collections) to be fast, 
+                    // OR fetch items if explicitly asked. 
+                    // User request: "geschachteltes JSON-Objekt mit Sub-Collections und Items"
+                    // Okay, let's try to add items but keep it lightweight (key/title).
+
+                    const items = collection.getChildItems(false); // false = don't include recursive items
+                    node.items = items.map(i => ({
+                        key: i.key,
+                        title: i.getField('title'),
+                        type: i.itemType
+                    })).filter(i => i.type !== 'note' && i.type !== 'attachment');
+                } else {
+                    node.hasChildren = collection.getChildCollections().length > 0;
+                }
+
+                return node;
+            };
+
+            const tree = rootCollections.map(c => buildTree(c, 0));
+            return MCPUtils.formatSuccess(tree);
+
+        } catch (e) {
+            Zotero.debug("MCP Error handleGetCollectionTree: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleGetItem(request) {
+        try {
+            const key = request.path.split('/')[2];
+            const libraryIDParam = request.query.libraryID;
+            let item = null;
+
+            Zotero.debug(`MCP: Requested single item lookup for key: ${key} (libParam=${libraryIDParam})`);
+
+            if (libraryIDParam) {
+                item = Zotero.Items.getByLibraryAndKey(parseInt(libraryIDParam), key);
+            } else {
+                const libraries = Zotero.Libraries.getAll();
+                for (const lib of libraries) {
+                    item = Zotero.Items.getByLibraryAndKey(lib.id, key);
+                    if (item) {
+                        Zotero.debug(`MCP: Found item ${key} in library ${lib.id}`);
+                        break;
+                    }
+                }
+            }
+
+            if (!item) {
+                Zotero.debug(`MCP: Item ${key} NOT FOUND in any library`);
+                return { statusCode: 404, body: { error: "Item not found" } };
+            }
+
+            const formatted = await this.formatItems([item.id]);
+            Zotero.debug(`MCP: Formatted data for ${key}: ${JSON.stringify(formatted).substring(0, 100)}...`);
+            return formatted;
+
+        } catch (e) {
+            Zotero.debug("MCP Error handleGetItem: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
         }
     }
 };

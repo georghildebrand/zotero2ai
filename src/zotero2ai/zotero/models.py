@@ -58,3 +58,29 @@ class ZoteroNote:
 
     def __repr__(self) -> str:
         return f"ZoteroNote(title='{self.title}', key='{self.key}')"
+@dataclass(frozen=True)
+class MemoryEntry:
+    """Represents a self-contained, disambiguated memory entry (Atomic Entry)."""
+
+    lossless_restatement: str
+    keywords: list[str] = field(default_factory=list)
+    timestamp: str | None = None
+    location: str | None = None
+    persons: list[str] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
+    topic: str | None = None
+
+    def to_html(self) -> str:
+        """Convert entry to HTML for Zotero storage."""
+        html = f"<p><b>Restatement:</b> {self.lossless_restatement}</p>"
+        if self.timestamp:
+            html += f"<p><b>Time:</b> {self.timestamp}</p>"
+        if self.location:
+            html += f"<p><b>Location:</b> {self.location}</p>"
+        if self.topic:
+            html += f"<p><b>Topic:</b> {self.topic}</p>"
+        if self.persons:
+            html += f"<p><b>Persons:</b> {', '.join(self.persons)}</p>"
+        if self.entities:
+            html += f"<p><b>Entities:</b> {', '.join(self.entities)}</p>"
+        return html

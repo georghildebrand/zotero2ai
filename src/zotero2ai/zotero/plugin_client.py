@@ -136,27 +136,79 @@ class PluginClient:
         """
         return self._request("GET", "/health")
 
-    def get_collections(self, parent_key: str | None = None) -> list[dict[str, Any]]:
+    def get_collections(
+        self, 
+        parent_key: str | None = None,
+        limit: int = 100,
+        start: int = 0,
+        sort: str = "title",
+        library_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """Get Zotero collections.
 
         Args:
             parent_key: Optional key to filter by. Use 'root' for top-level collections.
+            limit: Maximum number of collections to return.
+            start: Starting offset for pagination.
+            sort: Sort field ('title', 'dateAdded').
+            library_id: Optional library ID to filter by.
 
         Returns:
             List of collection objects with keys, names, and paths
         """
-        params = {}
+        params = {
+            "limit": limit,
+            "start": start,
+            "sort": sort
+        }
         if parent_key:
             params["parentKey"] = parent_key
+        if library_id:
+            params["libraryID"] = library_id
+
         response = self._request("GET", "/collections", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
-    def search_items(self, query: str | None = None, tag: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    def get_collections_paginated(
+        self, 
+        parent_key: str | None = None,
+        limit: int = 100,
+        start: int = 0,
+        sort: str = "title",
+        library_id: int | None = None
+    ) -> dict[str, Any]:
+        """Get Zotero collections with pagination info.
+
+        Args:
+            parent_key: Optional key to filter by. Use 'root' for top-level collections.
+            limit: Maximum number of collections to return.
+            start: Starting offset for pagination.
+            sort: Sort field ('title', 'dateAdded').
+            library_id: Optional library ID to filter by.
+
+        Returns:
+            Full API response dict containing 'data', 'pagination', etc.
+        """
+        params = {
+            "limit": limit,
+            "start": start,
+            "sort": sort
+        }
+        if parent_key:
+            params["parentKey"] = parent_key
+        if library_id:
+            params["libraryID"] = library_id
+
+        return self._request("GET", "/collections", params=params)
+
+
+    def search_items(self, query: str | None = None, tag: str | None = None, collection_key: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         """Search for items by title or tag.
 
         Args:
             query: Search query string (optional)
             tag: Tag to search for (optional)
+            collection_key: Filter by collection key (optional)
             limit: Maximum number of results (default: 10)
 
         Returns:
@@ -167,6 +219,8 @@ class PluginClient:
             params["q"] = query
         if tag:
             params["tag"] = tag
+        if collection_key:
+            params["collectionKey"] = collection_key
             
         response = self._request("GET", "/items/search", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
@@ -354,3 +408,57 @@ class PluginClient:
         if library_id:
             body["libraryID"] = library_id
         return self._request("POST", "/tags/rename", json=body)
+
+    def get_item_content(self, key: str, library_id: int | None = None) -> dict[str, Any]:
+        """Get the valid content (text/html) of an item or its attachment.
+
+        Args:
+            key: Item key
+            library_id: Library ID (optional)
+
+        Returns:
+            Dict containing 'content', 'contentType', 'filename', etc.
+        """
+        params = {}
+        if library_id:
+            params["libraryID"] = library_id
+        
+        response = self._request("GET", f"/items/{key}/content", params=params)
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def get_collection_tree(self, depth: int = 99, library_id: int | None = None) -> list[dict[str, Any]]:
+        """Get the full collection tree.
+
+        Args:
+            depth: Max depth of recursion (default: 99)
+            library_id: Library ID (optional)
+
+        Returns:
+            Nested list of collections and their children
+        """
+        params = {"depth": depth}
+        if library_id:
+            params["libraryID"] = library_id
+        
+        response = self._request("GET", "/collections/tree", params=params)
+        return cast(list[dict[str, Any]], response.get("data", []))
+
+    def get_item(self, key: str, library_id: int | None = None) -> dict[str, Any]:
+        """Get a single item by key.
+
+        Args:
+            key: Item key
+            library_id: Library ID (optional)
+
+        Returns:
+            Item data
+        """
+        params = {}
+        if library_id:
+            params["libraryID"] = library_id
+        
+        response = self._request("GET", f"/items/{key}", params=params)
+        data = response.get("data", [])
+        if not data:
+            return {}
+        return cast(dict[str, Any], data[0])

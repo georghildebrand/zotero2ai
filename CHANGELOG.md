@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added URL support: Tools now return URLs for webpage items and link attachments in addition to file paths.
 - New endpoint `/collections/{key}/items` in the plugin to retrieve all items in a collection.
 
-## [0.2.0] - 2024-12-30
+## [0.2.0] - 2025-12-30
 
 ### Added
 - Zotero Bridge Plugin (`zotero-mcp-bridge`) for secure communication.
