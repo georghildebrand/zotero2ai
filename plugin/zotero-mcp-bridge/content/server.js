@@ -182,14 +182,10 @@ var MCPServer = class {
             bos.setOutputStream(outputStream);
             bos.writeBytes(responseHead, responseHead.length);
 
-            if (bodyStr) {
-                const converter = Components.classes["@mozilla.org/intl/converter-output-stream;1"]
-                    .createInstance(Components.interfaces.nsIConverterOutputStream);
-                converter.init(outputStream, "UTF-8");
-                converter.writeString(bodyStr);
-                converter.flush();
-                // converter.close() would close outputStream, but we can also rely on bos.close()
+            if (bodyBytes.length > 0) {
+                bos.writeByteArray(Array.from(bodyBytes), bodyBytes.length);
             }
+            bos.flush();
             bos.close();
         } catch (e) {
             Zotero.debug(`MCPServer: Error sending response: ${e}`);

@@ -343,8 +343,13 @@ def create_mcp_server() -> FastMCP:
                 if not items:
                     return f"No items found in collection {collection_key}."
 
-                # Count total attachments
-                total_attachments = sum(len(item.get("attachments", [])) for item in items)
+                # Count total attachments (including items that are already attachments)
+                count = 0
+                for item in items:
+                    count += len(item.get("attachments", []))
+                    if item.get("itemType") == "attachment":
+                        count += 1
+                total_attachments = count
 
                 lines = [f"## Collection Items ({len(items)} items, {total_attachments} attachments)"]
 
@@ -361,6 +366,14 @@ def create_mcp_server() -> FastMCP:
                         lines.append(f"- Creators: {creators}")
 
                     attachments = item.get("attachments", [])
+                    
+                    # Special handling for standalone attachments
+                    if item.get("itemType") == "attachment":
+                        lines.append("- **This item is the attachment file itself:**")
+                        lines.append(f"  - Content Type: {item.get('contentType', 'unknown')}")
+                        if item.get("path"):
+                            lines.append(f"    Path: `{item['path']}`")
+                    
                     if attachments:
                         lines.append(f"- **Attachments ({len(attachments)}):**")
                         for att in attachments:
@@ -369,7 +382,7 @@ def create_mcp_server() -> FastMCP:
                                 lines.append(f"    Path: `{att['path']}`")
                             if att.get("url"):
                                 lines.append(f"    URL: {att['url']}")
-                    else:
+                    elif item.get("itemType") != "attachment":
                         lines.append("- No attachments")
 
                 return "\n".join(lines)
@@ -519,6 +532,15 @@ def create_mcp_server() -> FastMCP:
 
                 return f"## Content of {filename} ({content_type})\n\n{content}"
         except Exception as e:
+            import httpx
+            if isinstance(e, httpx.HTTPStatusError):
+                try:
+                    body = e.response.json()
+                    msg = body.get("message") or body.get("error")
+                    if msg:
+                        return f"Error getting item content: {msg} (Status: {e.response.status_code})"
+                except Exception:
+                    pass
             return f"Error getting item content: {str(e)}"
 
     @mcp.tool()
@@ -655,7 +677,7 @@ def create_mcp_server() -> FastMCP:
 
                 # Check if registry exists to report status
                 registry_title = "[MEM][system][global] Tag Registry"
-                items = client.search_items(query=registry_title, collection_key=cols["system"])
+                items = client.search_items(tag="mem:role:global", collection_key=cols["system"])
                 registry_ready = any(i["title"] == registry_title for i in items)
 
                 context = {
@@ -686,7 +708,7 @@ def create_mcp_server() -> FastMCP:
 
                 # Check if registry exists
                 registry_title = "[MEM][system][global] Tag Registry"
-                items = client.search_items(query=registry_title, collection_key=cols["system"])
+                items = client.search_items(tag="mem:role:global", collection_key=cols["system"])
                 if any(i["title"] == registry_title for i in items):
                     return f"Memory system already initialized in '{root_name}'. System key: {cols['system']}"
 
@@ -694,6 +716,7 @@ def create_mcp_server() -> FastMCP:
                 default_registry = {
                     "allowed_tags": {
                         "mem:class:": ["unit", "concept", "project", "system"],
+                        "mem:project:": [],  # Allow any value for now or we can populate it
                         "mem:role:": ["question", "observation", "hypothesis", "result", "synthesis"],
                         "mem:state:": ["active", "superseded", "archived"],
                         "mem:source:": ["agent", "user", "paper", "conversation", "manual"],

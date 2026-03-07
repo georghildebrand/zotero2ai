@@ -742,7 +742,7 @@ var RequestHandlers = class {
                 const date = this._safeGetField(item, 'date', '');
                 const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
 
-                result.push({
+                const itemData = {
                     key: item.key,
                     itemType: itemType,
                     title: title,
@@ -753,7 +753,19 @@ var RequestHandlers = class {
                     collections: item.getCollections(), // getCollections usually safe, returns array of keys
                     related: related,
                     attachments: attachments
-                });
+                };
+
+                // For attachment items, include the file path and content type at the top level
+                if (item.isAttachment()) {
+                    try {
+                        itemData.path = await item.getFilePathAsync();
+                        itemData.contentType = item.attachmentContentType || 'unknown';
+                    } catch (e) {
+                        Zotero.debug(`MCP: Error getting file path for attachment ${item.key}: ${e}`);
+                    }
+                }
+
+                result.push(itemData);
             } catch (e) {
                 Zotero.debug(`MCP: Error formatting item ${item.key}: ${e}`);
                 // Graceful degradation: return minimal info with error
@@ -901,41 +913,54 @@ var RequestHandlers = class {
 
                 // Prefer PDF, then HTML/Snapshot
                 for (const id of attachmentIDs) {
-                    const att = await Zotero.Items.getAsync(id);
-                    if (!att) continue;
+                    try {
+                        const att = await Zotero.Items.getAsync(id);
+                        if (!att) continue;
 
-                    if (att.attachmentContentType === 'application/pdf') {
-                        bestAttachment = att;
-                        break; // Found PDF, stop looking
-                    } else if (att.attachmentContentType === 'text/html' && !bestAttachment) {
-                        bestAttachment = att;
+                        const isPDF = att.attachmentContentType === 'application/pdf' ||
+                            att.attachmentContentType === 'application/x-pdf' ||
+                            (att.attachmentFilename && att.attachmentFilename.toLowerCase().endsWith('.pdf'));
+
+                        if (isPDF) {
+                            bestAttachment = att;
+                            break;
+                        } else if ((att.attachmentContentType === 'text/html' || att.attachmentContentType === 'text/plain') && !bestAttachment) {
+                            bestAttachment = att;
+                        }
+                    } catch (e) {
+                        Zotero.debug("MCP: Error in attachment loop: " + e);
                     }
                 }
 
                 if (bestAttachment) {
-                    item = bestAttachment; // Switch context to attachment
+                    item = bestAttachment;
                     sourceKey = item.key;
+                } else if (attachmentIDs.length > 0) {
+                    // Fallback to first attachment if none of the above
+                    const firstAtt = await Zotero.Items.getAsync(attachmentIDs[0]);
+                    if (firstAtt) {
+                        item = firstAtt;
+                        sourceKey = item.key;
+                    }
                 } else {
                     return MCPUtils.formatError("No suitable attachment found for this item");
                 }
             }
 
             // Now processing the attachment item
-            filename = item.attachmentFilename;
+            filename = item.attachmentFilename || "Unknown";
             contentType = item.attachmentContentType || "application/octet-stream";
 
             // 1. Try Zotero Fulltext (for PDFs especially)
             try {
-                if (Zotero.Fulltext && Zotero.Fulltext.getItemText) {
-                    const ft = await Zotero.Fulltext.getItemText(item.id);
-                    if (ft) {
-                        // ft might be a string or an object depending on version
-                        // In recent versions, it returns just the text string or false
-                        if (typeof ft === 'string') {
-                            content = ft;
-                        } else if (ft.text) {
-                            content = ft.text;
-                        }
+                if (Zotero.Fulltext) {
+                    if (typeof Zotero.Fulltext.getItemText === 'function') {
+                        content = await Zotero.Fulltext.getItemText(item.id);
+                    }
+
+                    // Fallback to Zotero 7 style or alternative method
+                    if (!content && typeof Zotero.Fulltext.getText === 'function') {
+                        content = await Zotero.Fulltext.getText(item.id);
                     }
                 }
             } catch (e) {
@@ -943,15 +968,14 @@ var RequestHandlers = class {
             }
 
             // 2. If no fulltext yet, and it's a file we can read
-            if (!content && (contentType === 'text/html' || contentType === 'text/plain' || filename.endsWith(".html") || filename.endsWith(".txt") || filename.endsWith(".md"))) {
+            if (!content && (contentType === 'text/html' || contentType === 'text/plain' ||
+                filename.toLowerCase().endsWith(".html") || filename.toLowerCase().endsWith(".txt") ||
+                filename.toLowerCase().endsWith(".md"))) {
                 const filePath = await item.getFilePathAsync();
                 if (filePath) {
-                    // Use IOUtils (Zotero 7)
                     if (typeof IOUtils !== 'undefined') {
                         content = await IOUtils.readUTF8(filePath);
-                        // Basic cleanup for HTML if needed, but returning raw HTML is fine for AI
                     } else if (typeof OS !== 'undefined' && OS.File) {
-                        // Zotero 6 fallback
                         const decoder = new TextDecoder();
                         content = decoder.decode(await OS.File.read(filePath));
                     }
@@ -959,13 +983,23 @@ var RequestHandlers = class {
             }
 
             if (!content) {
-                return {
-                    statusCode: 404,
-                    body: {
-                        error: "Content not available",
-                        message: "Could not extract text. Item might not be indexed or format is unsupported."
-                    }
-                };
+                let msg = "Content not available.";
+                if (contentType && (contentType.toLowerCase().includes("pdf") || (filename && filename.toLowerCase().endsWith(".pdf")))) {
+                    msg += " This PDF might not be indexed yet in Zotero. Please right-click the item in Zotero and select 'Reindex Item'.";
+                } else {
+                    msg += " Item format might be unsupported for direct text extraction.";
+                }
+
+                return MCPUtils.formatSuccess({
+                    key: sourceKey,
+                    error: "Content not available",
+                    message: msg,
+                    filename: filename,
+                    contentType: contentType,
+                    internalID: item.id,
+                    isRegularItem: (typeof item.isRegularItem === 'function' ? item.isRegularItem() : false),
+                    isAttachment: (typeof item.isAttachment === 'function' ? item.isAttachment() : false)
+                });
             }
 
             return MCPUtils.formatSuccess({

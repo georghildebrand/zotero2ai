@@ -29,9 +29,12 @@ class MemoryManager:
         root = self.client.search_collections(root_name)
         root_key = None
         if root:
-            # Take the best match
-            root_key = root[0]["key"]
-        else:
+            # Take the exact match (since search is fuzzy)
+            exact_match = next((c for c in root if c["name"].lower() == root_name.lower()), None)
+            if exact_match:
+                root_key = exact_match["key"]
+        
+        if not root_key:
             resp = self.client.create_collection(root_name)
             root_key = resp["key"]
         keys["root"] = root_key
@@ -67,8 +70,8 @@ class MemoryManager:
         """Load the Tag Registry from the _System collection."""
         registry_title = "[MEM][system][global] Tag Registry"
 
-        # Find the item by title
-        items = self.client.search_items(query=registry_title, collection_key=system_collection_key)
+        # Find the item by role tag (more reliable than fuzzy title search in Zotero)
+        items = self.client.search_items(tag="mem:role:global", collection_key=system_collection_key)
         registry_item = next((i for i in items if i["title"] == registry_title), None)
 
         if not registry_item:
@@ -108,7 +111,9 @@ class MemoryManager:
 
                 # If axis exists in registry, the value must be allowed
                 if axis in allowed:
-                    if value not in allowed[axis]:
+                    allowed_values = allowed[axis]
+                    # If empty list, we allow any value (free-form axis)
+                    if allowed_values and value not in allowed_values:
                         raise ValueError(f"Tag '{tag}' value '{value}' not allowed for axis '{axis}'.")
                 else:
                     # Registry doesn't know this axis - for Phase 1 we reject unknown axes
