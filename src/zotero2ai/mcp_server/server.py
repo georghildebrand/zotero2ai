@@ -528,8 +528,16 @@ def create_mcp_server() -> FastMCP:
 
                 filename = data.get("filename", "Unknown")
                 content_type = data.get("contentType", "Unknown")
-                content = data.get("content", "")
-
+                content = data.get("content")
+                
+                if (not content or content == ""):
+                    if "error" in data or "message" in data:
+                        diag = f"(Indexed: {data.get('indexed', 'Unknown')}, Path: {data.get('path', 'Unknown')})"
+                        return f"## Content Missing for {filename}\n\nError from Zotero: {data.get('message', 'No details available.')} {diag}\n\nFull Diagnostic: {str(data)}"
+                    else:
+                        return f"## Content Empty for {filename}\n\nNo text extracted from this item. Full Diagnostic: {str(data)}"
+                
+                content = content or ""
                 return f"## Content of {filename} ({content_type})\n\n{content}"
         except Exception as e:
             import httpx

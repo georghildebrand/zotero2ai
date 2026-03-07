@@ -954,13 +954,36 @@ var RequestHandlers = class {
             // 1. Try Zotero Fulltext (for PDFs especially)
             try {
                 if (Zotero.Fulltext) {
+                    let ft = null;
                     if (typeof Zotero.Fulltext.getItemText === 'function') {
-                        content = await Zotero.Fulltext.getItemText(item.id);
+                        ft = await Zotero.Fulltext.getItemText(item.id);
                     }
 
-                    // Fallback to Zotero 7 style or alternative method
-                    if (!content && typeof Zotero.Fulltext.getText === 'function') {
-                        content = await Zotero.Fulltext.getText(item.id);
+                    if (!ft && typeof Zotero.Fulltext.getText === 'function') {
+                        ft = await Zotero.Fulltext.getText(item.id);
+                    }
+
+                    if (ft) {
+                        if (typeof ft === 'string') {
+                            content = ft;
+                        } else if (ft.text) {
+                            content = ft.text;
+                        }
+                    }
+
+                    // Fallback 1.2: Check if annotations exist (sometimes Zotero 7 stores extracted text in annotations/notes)
+                    if (!content && typeof item.getNotes === 'function') {
+                        const noteIDs = item.getNotes();
+                        for (const noteID of noteIDs) {
+                            const note = await Zotero.Items.getAsync(noteID);
+                            if (note && note.isNote()) {
+                                const noteMarkdown = note.getNote();
+                                if (noteMarkdown && noteMarkdown.length > 50) { // Likely extracted text
+                                    content = noteMarkdown;
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             } catch (e) {
@@ -982,10 +1005,23 @@ var RequestHandlers = class {
                 }
             }
 
+            let isIndexed = false;
+            let filePath = "";
+            try {
+                if (Zotero.Fulltext && typeof Zotero.Fulltext.isIndexed === 'function') {
+                    isIndexed = await Zotero.Fulltext.isIndexed(item.id);
+                }
+                filePath = await item.getFilePathAsync();
+            } catch (e) { }
+
             if (!content) {
                 let msg = "Content not available.";
                 if (contentType && (contentType.toLowerCase().includes("pdf") || (filename && filename.toLowerCase().endsWith(".pdf")))) {
-                    msg += " This PDF might not be indexed yet in Zotero. Please right-click the item in Zotero and select 'Reindex Item'.";
+                    if (!isIndexed) {
+                        msg += " This PDF is NOT yet indexed by Zotero. Please right-click the item and select 'Reindex Item'.";
+                    } else {
+                        msg += " PDF is indexed but extraction returned no text. The PDF might be a scanned image without OCR.";
+                    }
                 } else {
                     msg += " Item format might be unsupported for direct text extraction.";
                 }
@@ -996,18 +1032,20 @@ var RequestHandlers = class {
                     message: msg,
                     filename: filename,
                     contentType: contentType,
-                    internalID: item.id,
-                    isRegularItem: (typeof item.isRegularItem === 'function' ? item.isRegularItem() : false),
-                    isAttachment: (typeof item.isAttachment === 'function' ? item.isAttachment() : false)
+                    path: filePath,
+                    indexed: isIndexed,
+                    internalID: item.id
                 });
             }
 
             return MCPUtils.formatSuccess({
                 key: sourceKey,
-                parentKey: item.parentItemKey,
+                parentKey: item.parentItemKey || null,
                 filename: filename,
                 contentType: contentType,
-                content: content
+                content: content,
+                path: filePath,
+                indexed: isIndexed
             });
 
         } catch (e) {
