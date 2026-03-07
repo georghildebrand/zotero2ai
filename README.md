@@ -138,6 +138,33 @@ claude mcp add-json zotero2ai '{
 }' --scope user
 ```
 
+or via pure mcp config
+
+
+```
+{
+  "mcpServers": {
+    "zotero2ai": {
+      "command": "/path/to/uv/bin/uv",
+      "args": [
+        "--directory",
+        "/path/to/zotero2ai",
+        "run",
+        "mcp-zotero2ai",
+        "run"
+      ],
+      "env": {
+        "ZOTERO_DATA_DIR": "/path/to/zotero",
+        "ZOTERO_BRIDGE_PORT": "23120",
+        "ZOTERO_MCP_TOKEN": "your_generated_mcp_token_here",
+        "PATH": "/path/to/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      "disabled": false
+    }
+  }
+}
+```
+
 > [!TIP]
 > Use `--scope project` if you only want the server available within this specific repository.
 

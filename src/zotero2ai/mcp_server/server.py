@@ -538,6 +538,12 @@ def create_mcp_server() -> FastMCP:
                         return f"## Content Empty for {filename}\n\nNo text extracted from this item. Full Diagnostic: {str(data)}"
                 
                 content = content or ""
+                
+                # If it's HTML, clean it up to prevent giant raw strings
+                is_html = content_type == "text/html" or filename.lower().endswith((".html", ".htm"))
+                if is_html:
+                    content = clean_html(content, preserve_newlines=True)
+                    
                 return f"## Content of {filename} ({content_type})\n\n{content}"
         except Exception as e:
             import httpx

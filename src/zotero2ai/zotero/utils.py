@@ -16,6 +16,12 @@ def clean_html(html_content: str, preserve_newlines: bool = False) -> str:
     if not html_content:
         return ""
 
+    # Strip base64 data URIs FIRST before any tag processing.
+    # SingleFile-saved HTML pages embed fonts/images as base64 blobs directly
+    # in <style> tags (e.g. url(data:font/woff2;base64,...)) which are hundreds
+    # of KB each. Removing them early makes subsequent regex much faster.
+    html_content = re.sub(r"data:[a-zA-Z0-9+/\-]+;base64,[A-Za-z0-9+/=]+", "", html_content)
+
     # Remove head, script and style elements COMPLETELY (including content)
     # Using non-greedy match to handle multiple blocks
     # We use a very robust pattern to avoid regex recursion limits on huge files
