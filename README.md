@@ -15,12 +15,17 @@ Note: This is a work in progress and is not yet ready for production use. Also i
 -   **No Database Locks**: Avoids SQLite concurrency issues by using the Zotero internal API.
 -   **Friendly Name Discovery**: Automatically generates human-readable titles for notes.
 -   **Security First**: Uses 256-bit Bearer tokens and binds exclusively to the loopback interface (`127.0.0.1`).
+-   **Agent Memory Pack**: A complete Zotero-native lifelong memory system for LLM agents. Features structured storage, semantic PDF extraction, automated topic consolidation, and Mermaid.js knowledge graphing.
+
+### SimpleMem Attribution
+
+This project's memory architecture is inspired by **SimpleMem: Efficient Lifelong Memory for LLM Agents** ([GitHub](https://github.com/Yue-Sheng/SimpleMem)). While adapted for Zotero's hierarchical structure, it follows the core principles of structured, lifelong memory for autonomous agents.
 
 ## Prerequisites
 
 1.  **Zotero 7**: Ensure you are running Zotero 7.
 2.  **Zotero Bridge Plugin**: You must install the `zotero-mcp-bridge` plugin in Zotero.
-    -   Download the latest `.xpi` from the releases page.
+    -   Build the plugin `.xpi` file manually (see Installation) or download the latest from the releases page.
     -   In Zotero, go to `Tools` -> `Add-ons` -> `Install Add-on From File...`.
     -   Restart Zotero.
 3.  **Auth Token**: Once installed, the plugin will generate an authentication token visible in the Zotero UI.
@@ -36,6 +41,10 @@ cd zotero2ai
 
 # Install dependencies and set up virtual environment
 make install
+
+# Build the Zotero plugin (.xpi file)
+make build-plugin
+# The plugin will be saved as plugin/zotero-mcp-bridge.xpi
 ```
 
 ## Configuration
@@ -64,6 +73,14 @@ The following tools are exposed to the AI model:
 -   `create_or_extend_note`: Create a new note or append to an existing one.
 -   `set_active_collection`: Set a default collection for new notes.
 -   `get_active_collection`: Check which collection is currently active.
+
+#### Zotero Agent Memory Pack
+The Agent Memory Pack gives LLMs persistent, lifelong memory structured directly inside your Zotero library:
+-   **Creation & Extraction**: `memory_create_item` and `memory_extract_from_text` (automatically reads and parses full Zotero PDFs into distinct facts).
+-   **Retrieval & Recall**: `memory_recall` and `memory_timeline` allow agents to fetch project history by tags and dates.
+-   **Consolidation**: `memory_suggest_consolidation` and `memory_synthesize` cluster raw observations into high-level concepts using keyword grouping.
+-   **Visualization**: `memory_project_graph` exports a Mermaid.js dependency graph showing how your ideas evolved.
+-   **Autosave Workflow**: Includes an `agent_memory_autosave` MCP prompt to instruct clients when to proactively persist high-utility facts.
 
 ## Usage
 
@@ -131,6 +148,7 @@ The `Makefile` provides several utility targets for development and quality assu
 | Target | Description |
 |--------|-------------|
 | `make install` | Set up development environment and install dependencies. |
+| `make build-plugin` | Build the zotero-mcp-bridge `.xpi` plugin. |
 | `make doctor` | Run diagnostics to check Zotero and Plugin configuration. |
 | `make run` | Start the MCP server. |
 | `make test` | Run the test suite. |

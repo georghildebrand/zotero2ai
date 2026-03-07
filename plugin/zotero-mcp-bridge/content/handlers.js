@@ -33,7 +33,12 @@ var RequestHandlers = class {
             if (method === "PUT" && path.match(/^\/notes\/[A-Z0-9]+$/)) return await this.handleUpdateNote(request);
             if (method === "GET" && path === "/tags") return await this.handleGetTags(request);
             if (method === "POST" && path === "/tags/rename") return await this.handleRenameTag(request);
+            if (method === "POST" && path === "/collections") return await this.handleCreateCollection(request);
+            if (method === "POST" && path === "/items") return await this.handleCreateItem(request);
+            if (method === "PUT" && path.match(/^\/items\/[A-Z0-9]+$/)) return await this.handleUpdateItem(request);
+            if (method === "POST" && path.match(/^\/items\/[A-Z0-9]+\/related$/)) return await this.handleAddRelated(request);
             if (method === "GET" && path.match(/^\/items\/[A-Z0-9]+\/content$/)) return await this.handleGetItemContent(request);
+
 
             return {
                 statusCode: 404,
@@ -373,6 +378,9 @@ var RequestHandlers = class {
             const collectionKey = request.query.collectionKey || "";
             const limit = parseInt(request.query.limit || "10");
             const libraryIDParam = request.query.libraryID;
+            const dateFrom = request.query.dateFrom || "";
+            const dateTo = request.query.dateTo || "";
+            const sortBy = request.query.sortBy || "";  // "dateAdded" for chronological
 
             if (!searchQuery && !tag && !collectionKey) return MCPUtils.formatError("Missing 'q', 'tag', or 'collectionKey' query parameter");
 
@@ -387,25 +395,43 @@ var RequestHandlers = class {
                     s.addCondition('title', 'contains', searchQuery);
                 }
 
+                // Support multiple tags (comma-separated): "mem:class:unit,mem:state:active"
                 if (tag) {
-                    s.addCondition('tag', 'is', tag);
+                    const tags = tag.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                    for (const singleTag of tags) {
+                        s.addCondition('tag', 'is', singleTag);
+                    }
                 }
 
                 if (collectionKey) {
                     s.addCondition('collection', 'is', collectionKey);
                 }
 
+                // Date range filtering
+                if (dateFrom) {
+                    s.addCondition('dateAdded', 'isAfter', dateFrom);
+                }
+                if (dateTo) {
+                    s.addCondition('dateAdded', 'isBefore', dateTo);
+                }
+
                 s.addCondition('itemType', 'isNot', 'attachment');
                 s.addCondition('itemType', 'isNot', 'note');
 
-                // FIX: Zotero 7 search() ist ASYNC -> await!
                 const itemIDs = await s.search();
                 allItemIDs = allItemIDs.concat(itemIDs);
                 if (allItemIDs.length >= limit) break;
             }
 
+            // If sortBy is requested, load items for sorting before limiting
+            if (sortBy === 'dateAdded' && allItemIDs.length > 0) {
+                const items = await Zotero.Items.getAsync(allItemIDs);
+                items.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
+                const limitedItems = items.slice(0, limit);
+                return await this.formatItems(limitedItems);
+            }
+
             const limitedIDs = allItemIDs.slice(0, limit);
-            // Items laden (getAsync ist besser in Zotero 7, aber get() geht oft noch)
             return await this.formatItems(limitedIDs);
         } catch (e) {
             return { statusCode: 500, body: { error: e.message } };
@@ -647,10 +673,41 @@ var RequestHandlers = class {
     }
 
     async _getRelatedKeys(item) {
-        const ids = item.getRelatedItemIDs ? item.getRelatedItemIDs() : (item.getRelatedItems ? item.getRelatedItems() : []);
-        if (!ids || ids.length === 0) return [];
-        const items = await Zotero.Items.getAsync(ids);
-        return items.filter(i => i).map(i => i.key);
+        try {
+            const keys = new Set();
+
+            // Modern Zotero 7 method
+            if (typeof item.getRelationsByPredicate === 'function') {
+                const relURIs = item.getRelationsByPredicate('dc:relation');
+                if (relURIs && Array.isArray(relURIs)) {
+                    for (const uri of relURIs) {
+                        if (typeof uri === 'string' && uri.startsWith('http://zotero.org/')) {
+                            // Extract key directly from URI e.g. http://zotero.org/users/123/items/YACU8TY5
+                            const parts = uri.split('/');
+                            const key = parts[parts.length - 1];
+                            if (key && key.length >= 8) keys.add(key);
+                        }
+                    }
+                }
+            } else {
+                // Fallback for older versions
+                const rawRels = item.getRelatedItemIDs ? item.getRelatedItemIDs() : (item.getRelatedItems ? item.getRelatedItems() : []);
+                for (const rel of rawRels) {
+                    if (typeof rel === 'number') {
+                        const rItem = Zotero.Items.get(rel);
+                        if (rItem && rItem.key) keys.add(rItem.key);
+                    } else if (typeof rel === 'string' && rel.startsWith('http://zotero.org/')) {
+                        const parts = rel.split('/');
+                        const key = parts[parts.length - 1];
+                        if (key && key.length >= 8) keys.add(key);
+                    }
+                }
+            }
+            return Array.from(keys);
+        } catch (e) {
+            Zotero.debug("MCP: Error in _getRelatedKeys: " + e);
+            return [];
+        }
     }
 
     async formatItems(itemIDsOrItems) {
@@ -1021,6 +1078,190 @@ var RequestHandlers = class {
         } catch (e) {
             Zotero.debug("MCP Error handleGetItem: " + e);
             return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleCreateCollection(request) {
+        try {
+            const body = request.body;
+            if (!body || !body.name) return MCPUtils.formatError("Missing required field: name");
+
+            const collection = new Zotero.Collection();
+            collection.name = body.name;
+            collection.libraryID = body.libraryID ? parseInt(body.libraryID) : Zotero.Libraries.userLibraryID;
+
+            if (body.parentKey) {
+                collection.parentKey = body.parentKey;
+            }
+
+            await collection.saveTx();
+
+            return {
+                statusCode: 201,
+                body: {
+                    success: true,
+                    data: {
+                        key: collection.key,
+                        name: collection.name,
+                        libraryID: collection.libraryID,
+                        fullPath: MCPUtils.getCollectionPath(collection)
+                    }
+                }
+            };
+        } catch (e) {
+            Zotero.debug("MCP Error handleCreateCollection: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleCreateItem(request) {
+        try {
+            Zotero.debug("MCP: handleCreateItem called with body: " + JSON.stringify(request.body));
+            const body = request.body;
+            if (!body || !body.title) return MCPUtils.formatError("Missing required field: title");
+
+            // Standardize on 'report' as default itemType for Phase 1 memory nodes
+            const itemType = body.itemType || "report";
+            const item = new Zotero.Item(itemType);
+
+            item.libraryID = body.libraryID ? parseInt(body.libraryID) : Zotero.Libraries.userLibraryID;
+            item.setField('title', body.title);
+
+            // Set approved fields if present
+            if (body.fields && typeof body.fields === 'object') {
+                for (const field in body.fields) {
+                    try {
+                        item.setField(field, body.fields[field]);
+                    } catch (e) {
+                        Zotero.debug(`MCP: Field ${field} not supported for itemType ${itemType}`);
+                    }
+                }
+            }
+
+            if (body.tags && Array.isArray(body.tags)) {
+                item.setTags(body.tags.map(t => ({ tag: t })));
+            }
+
+            if (body.collections && Array.isArray(body.collections)) {
+                item.setCollections(body.collections);
+            }
+
+            await item.saveTx();
+
+            // If note is present, create a child note
+            if (body.note) {
+                const note = new Zotero.Item('note');
+                note.libraryID = item.libraryID;
+                note.parentItemID = item.id;
+                note.setNote(body.note);
+                await note.saveTx();
+            }
+
+            return {
+                statusCode: 201,
+                body: {
+                    success: true,
+                    data: {
+                        key: item.key,
+                        title: body.title
+                    }
+                }
+            };
+        } catch (e) {
+            Zotero.debug("MCP Error handleCreateItem: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleUpdateItem(request) {
+        try {
+            const pathParts = request.path.split('/');
+            const key = pathParts[2];
+            const body = request.body;
+
+            Zotero.debug(`MCP: handleUpdateItem for key ${key}`);
+
+            const libraries = Zotero.Libraries.getAll();
+            let item = null;
+            for (const lib of libraries) {
+                item = Zotero.Items.getByLibraryAndKey(lib.id, key);
+                if (item) break;
+            }
+
+            if (!item) return { statusCode: 404, body: { error: "Item not found" } };
+
+            if (body.title !== undefined) item.setField('title', body.title);
+            if (body.tags !== undefined) item.setTags(body.tags.map(t => ({ tag: t })));
+            if (body.collections !== undefined) item.setCollections(body.collections);
+
+            await item.saveTx();
+
+            return MCPUtils.formatSuccess({ success: true, key: key });
+        } catch (e) {
+            Zotero.debug("MCP Error handleUpdateItem: " + e);
+            return { statusCode: 500, body: { error: e.toString() } };
+        }
+    }
+
+    async handleAddRelated(request) {
+        try {
+            const pathParts = request.path.split('/');
+            const key = pathParts[2];
+            const body = request.body;
+
+            Zotero.debug(`MCP: handleAddRelated for key ${key} with relatedKeys ${JSON.stringify(body?.relatedKeys)}`);
+
+            if (!body || !body.relatedKeys || !Array.isArray(body.relatedKeys)) {
+                return MCPUtils.formatError("Missing required field: relatedKeys (array)");
+            }
+
+            const libraries = Zotero.Libraries.getAll();
+            let sourceItem = null;
+            for (const lib of libraries) {
+                sourceItem = Zotero.Items.getByLibraryAndKey(lib.id, key);
+                if (sourceItem) break;
+            }
+
+            if (!sourceItem) {
+                Zotero.debug(`MCP Error: Source item ${key} not found.`);
+                return { statusCode: 404, body: { error: "Source item not found" } };
+            }
+
+            let addedCount = 0;
+            for (const relKey of body.relatedKeys) {
+                let relItem = null;
+                for (const lib of libraries) {
+                    relItem = Zotero.Items.getByLibraryAndKey(lib.id, relKey);
+                    if (relItem) break;
+                }
+
+                if (relItem) {
+                    try {
+                        const relURI = Zotero.URI.getItemURI(relItem);
+                        if (typeof sourceItem.addRelation === 'function') {
+                            sourceItem.addRelation('dc:relation', relURI);
+                            addedCount++;
+                        } else if (typeof sourceItem.addRelatedItem === 'function') {
+                            sourceItem.addRelatedItem(relItem);
+                            addedCount++;
+                        } else if (typeof sourceItem.addRelated === 'function') {
+                            sourceItem.addRelated(relURI);
+                            addedCount++;
+                        }
+                    } catch (e) {
+                        Zotero.debug(`MCP Warning: Could not link ${key} to ${relKey}: ${e}`);
+                    }
+                } else {
+                    Zotero.debug(`MCP Warning: Related item ${relKey} not found.`);
+                }
+            }
+
+            await sourceItem.saveTx();
+
+            return MCPUtils.formatSuccess({ success: true, key: key, itemsAdded: addedCount });
+        } catch (e) {
+            Zotero.debug("MCP Error handleAddRelated: " + e + "\nStack: " + e.stack);
+            return { statusCode: 500, body: { error: e.toString(), stack: e.stack } };
         }
     }
 };

@@ -96,7 +96,7 @@ def test_doctor_success_mocked(tmp_path):
         mock_connect.return_value.cursor.return_value = mock_cursor
         mock_cursor.execute.return_value.fetchone.return_value = (1,)  # Simulate some count
 
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, "-m", "zotero2ai.cli", "doctor"],
             capture_output=True,
             text=True,
@@ -148,5 +148,3 @@ def test_env_var_respected(tmp_path):
 
     # It should pass or at least find the directory
     assert str(custom_dir) in result.stderr or str(custom_dir) in result.stdout
-
-

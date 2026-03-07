@@ -43,9 +43,10 @@ class PluginClient:
             self.base_url = base_url.rstrip("/")
         else:
             import os
+
             port = os.getenv("ZOTERO_BRIDGE_PORT", "23120")
             self.base_url = f"http://127.0.0.1:{port}"
-            
+
         self.auth_token = auth_token
         self.timeout = timeout
         self._client: httpx.Client | None = None
@@ -136,14 +137,7 @@ class PluginClient:
         """
         return self._request("GET", "/health")
 
-    def get_collections(
-        self, 
-        parent_key: str | None = None,
-        limit: int = 100,
-        start: int = 0,
-        sort: str = "title",
-        library_id: int | None = None
-    ) -> list[dict[str, Any]]:
+    def get_collections(self, parent_key: str | None = None, limit: int = 100, start: int = 0, sort: str = "title", library_id: int | None = None) -> list[dict[str, Any]]:
         """Get Zotero collections.
 
         Args:
@@ -156,11 +150,7 @@ class PluginClient:
         Returns:
             List of collection objects with keys, names, and paths
         """
-        params = {
-            "limit": limit,
-            "start": start,
-            "sort": sort
-        }
+        params = {"limit": limit, "start": start, "sort": sort}
         if parent_key:
             params["parentKey"] = parent_key
         if library_id:
@@ -169,14 +159,7 @@ class PluginClient:
         response = self._request("GET", "/collections", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
-    def get_collections_paginated(
-        self, 
-        parent_key: str | None = None,
-        limit: int = 100,
-        start: int = 0,
-        sort: str = "title",
-        library_id: int | None = None
-    ) -> dict[str, Any]:
+    def get_collections_paginated(self, parent_key: str | None = None, limit: int = 100, start: int = 0, sort: str = "title", library_id: int | None = None) -> dict[str, Any]:
         """Get Zotero collections with pagination info.
 
         Args:
@@ -189,11 +172,7 @@ class PluginClient:
         Returns:
             Full API response dict containing 'data', 'pagination', etc.
         """
-        params = {
-            "limit": limit,
-            "start": start,
-            "sort": sort
-        }
+        params = {"limit": limit, "start": start, "sort": sort}
         if parent_key:
             params["parentKey"] = parent_key
         if library_id:
@@ -201,14 +180,25 @@ class PluginClient:
 
         return self._request("GET", "/collections", params=params)
 
-
-    def search_items(self, query: str | None = None, tag: str | None = None, collection_key: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
-        """Search for items by title or tag.
+    def search_items(
+        self,
+        query: str | None = None,
+        tag: str | list[str] | None = None,
+        collection_key: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        sort_by: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search for items by title, tags, date range, or collection.
 
         Args:
             query: Search query string (optional)
-            tag: Tag to search for (optional)
+            tag: Tag or list of tags to filter by (AND logic, optional)
             collection_key: Filter by collection key (optional)
+            date_from: ISO date string, items added after this date (optional)
+            date_to: ISO date string, items added before this date (optional)
+            sort_by: Sort field, e.g. 'dateAdded' for chronological (optional)
             limit: Maximum number of results (default: 10)
 
         Returns:
@@ -218,10 +208,19 @@ class PluginClient:
         if query:
             params["q"] = query
         if tag:
-            params["tag"] = tag
+            if isinstance(tag, list):
+                params["tag"] = ",".join(tag)
+            else:
+                params["tag"] = tag
         if collection_key:
             params["collectionKey"] = collection_key
-            
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
+        if sort_by:
+            params["sortBy"] = sort_by
+
         response = self._request("GET", "/items/search", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
@@ -404,7 +403,7 @@ class PluginClient:
         Returns:
             Success status
         """
-        body = {"oldName": old_name, "newName": new_name}
+        body: dict[str, str | int] = {"oldName": old_name, "newName": new_name}
         if library_id:
             body["libraryID"] = library_id
         return self._request("POST", "/tags/rename", json=body)
@@ -422,7 +421,7 @@ class PluginClient:
         params = {}
         if library_id:
             params["libraryID"] = library_id
-        
+
         response = self._request("GET", f"/items/{key}/content", params=params)
         return cast(dict[str, Any], response.get("data", {}))
 
@@ -439,7 +438,7 @@ class PluginClient:
         params = {"depth": depth}
         if library_id:
             params["libraryID"] = library_id
-        
+
         response = self._request("GET", "/collections/tree", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
@@ -456,9 +455,117 @@ class PluginClient:
         params = {}
         if library_id:
             params["libraryID"] = library_id
-        
+
         response = self._request("GET", f"/items/{key}", params=params)
         data = response.get("data", [])
         if not data:
             return {}
         return cast(dict[str, Any], data[0])
+
+    def create_collection(self, name: str, parent_key: str | None = None, library_id: int | None = None) -> dict[str, Any]:
+        """Create a new Zotero collection.
+
+        Args:
+            name: Collection name
+            parent_key: Optional parent collection key
+            library_id: Optional library ID (defaults to user library)
+
+        Returns:
+            Created collection data
+        """
+        body: dict[str, Any] = {"name": name}
+        if parent_key:
+            body["parentKey"] = parent_key
+        if library_id:
+            body["libraryID"] = library_id
+
+        response = self._request("POST", "/collections", json=body)
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def create_item(
+        self,
+        item_type: str,
+        title: str,
+        tags: list[str] | None = None,
+        collections: list[str] | None = None,
+        note: str | None = None,
+        fields: dict[str, str] | None = None,
+        library_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Zotero item.
+
+        Args:
+            item_type: Zotero item type (e.g., 'report', 'book')
+            title: Item title
+            tags: Optional list of tags
+            collections: Optional list of collection keys
+            note: Optional HTML content for a child note
+            fields: Optional dict of additional fields
+            library_id: Optional library ID (defaults to user library)
+
+        Returns:
+            Created item data
+        """
+        body: dict[str, Any] = {"itemType": item_type, "title": title}
+        if tags:
+            body["tags"] = tags
+        if collections:
+            body["collections"] = collections
+        if note:
+            body["note"] = note
+        if fields:
+            body["fields"] = fields
+        if library_id:
+            body["libraryID"] = library_id
+
+        response = self._request("POST", "/items", json=body)
+        return cast(dict[str, Any], response.get("data", {}))
+
+    def add_related(self, key: str, related_keys: list[str]) -> dict[str, Any]:
+        """Add Zotero Related links between items.
+
+        Args:
+            key: Source item key
+            related_keys: List of target item keys to link to
+
+        Returns:
+            Success status
+        """
+        body = {"relatedKeys": related_keys}
+        return self._request("POST", f"/items/{key}/related", json=body)
+
+    def update_item(
+        self,
+        key: str,
+        title: str | None = None,
+        tags: list[str] | list[dict[str, str]] | None = None,
+        collections: list[str] | list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing Zotero item via the bridge.
+
+        Args:
+            key: Item key to update
+            title: New title
+            tags: List of tags
+            collections: List of collection keys or IDs
+
+        Returns:
+            Success status and updated key
+        """
+        body: dict[str, Any] = {}
+        if title is not None:
+            body["title"] = title
+        if tags is not None:
+            # handle list[str] vs list[dict]
+            clean_tags = []
+            for t in tags:
+                if isinstance(t, dict):
+                    clean_tags.append(t.get("tag", ""))
+                else:
+                    clean_tags.append(str(t))
+            body["tags"] = clean_tags
+        if collections is not None:
+            body["collections"] = collections
+
+        return self._request("PUT", f"/items/{key}", json=body)
+

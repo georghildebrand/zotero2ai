@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CollectionResponse(BaseModel):
@@ -49,7 +49,7 @@ def validate_item(data: dict[str, Any]):
 
 class CreateNoteResponse(BaseModel):
     key: str
-    itemType: str = "note"
+    item_type: str = Field(default="note", alias="itemType")
     note: str
     tags: list[str]
     parentItemKey: str | None = None  # noqa: N815

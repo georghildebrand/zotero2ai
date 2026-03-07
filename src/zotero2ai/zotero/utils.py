@@ -1,7 +1,6 @@
-"""Utility functions for Zotero data processing."""
-
 import re
 from html import unescape
+from re import Match
 
 
 def clean_html(html_content: str, preserve_newlines: bool = False) -> str:
@@ -31,8 +30,8 @@ def clean_html(html_content: str, preserve_newlines: bool = False) -> str:
         cleaned = re.sub(r"<(br|p|div|tr|h\d)[^>]*?>", "\n", cleaned, flags=re.IGNORECASE)
 
     # Replace <img> tags with placeholders
-    def replace_img(match: re.Match) -> str:
-        alt = re.search(r'alt=["\'](.*?)["\']', match.group(0), re.IGNORECASE)
+    def replace_img(m: Match[str]) -> str:
+        alt = re.search(r'alt=["\'](.*?)["\']', m.group(0), re.IGNORECASE)
         if alt:
             return f" [Image: {alt.group(1)}] "
         return " [Image] "

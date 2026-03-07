@@ -37,6 +37,9 @@ setup:  ## Set up development environment
 install:  ## Install dependencies with dev extras
 > $(UV) sync --all-extras
 
+build-plugin:  ## Build the Zotero plugin (.xpi)
+> cd plugin && ./build.sh
+
 # =============================================================================
 # BUILD & PACKAGING
 # =============================================================================
@@ -125,4 +128,5 @@ all: check build ## Full pipeline (check + build)
 
 .PHONY: help setup install build clean distclean format format-check lint test test-cov \
         test-install doctor run run-help validate check ci all \
-        install-system uninstall-system
+         test-install doctor run run-help validate check ci all \
+        install-system uninstall-system build-plugin

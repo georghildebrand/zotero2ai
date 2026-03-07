@@ -43,7 +43,9 @@ async def test_tool_list_collections(mcp, env_vars):
     # Call the tool via FastMCP (FastMCP tools are synchronous in our definition)
     # But FastMCP wraps them. Let's find the tool.
     result = await mcp.call_tool("list_collections", {})
-    assert any("My Papers (key: C1)" in str(item) for item in result)
+    # tool returns JSON string now
+    assert "My Papers" in str(result)
+    assert "C1" in str(result)
 
 
 @respx.mock
@@ -208,8 +210,8 @@ async def test_tool_list_notes_active_collection(mcp, env_vars):
         )
     )
 
-    with patch("zotero2ai.mcp_server.server.ActiveCollectionManager") as MockManager:
-        instance = MockManager.return_value
+    with patch("zotero2ai.mcp_server.server.ActiveCollectionManager") as mock_manager_cls:
+        instance = mock_manager_cls.return_value
         instance.get_active_collection_key.return_value = "AC1"
 
         result = await mcp.call_tool("list_notes", {})
@@ -234,15 +236,15 @@ async def test_tool_create_note_active_collection(mcp, env_vars):
         )
     )
 
-    with patch("zotero2ai.mcp_server.server.ActiveCollectionManager") as MockManager:
-        instance = MockManager.return_value
+    with patch("zotero2ai.mcp_server.server.ActiveCollectionManager") as mock_manager_cls:
+        instance = mock_manager_cls.return_value
         instance.get_active_collection_key.return_value = "AC1"
 
         result = await mcp.call_tool("create_or_extend_note", {"content": "New Note in Active Collection"})
 
         request = respx.calls.last.request
         import json
+
         body = json.loads(request.content)
         assert body["collections"] == ["AC1"]
         assert any("Successfully created new note" in str(item) and "N3" in str(item) for item in result)
-

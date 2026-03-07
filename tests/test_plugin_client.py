@@ -338,3 +338,38 @@ def test_base_url_trailing_slash_removed():
     """Test that trailing slash is removed from base URL."""
     client = PluginClient(base_url="http://127.0.0.1:23120/")
     assert client.base_url == "http://127.0.0.1:23120"
+
+
+def test_create_collection(client, mock_plugin):
+    """Test creating a new collection."""
+    mock_plugin.post("/collections").mock(
+        return_value=Response(
+            201,
+            json={"success": True, "data": {"key": "COL123", "name": "New Collection"}},
+        )
+    )
+
+    resp = client.create_collection("New Collection")
+    assert resp["key"] == "COL123"
+    assert resp["name"] == "New Collection"
+
+
+def test_create_item(client, mock_plugin):
+    """Test creating a new item with metadata."""
+    mock_plugin.post("/items").mock(
+        return_value=Response(
+            201,
+            json={"success": True, "data": {"key": "ITEM123", "title": "New Item"}},
+        )
+    )
+
+    resp = client.create_item(item_type="report", title="New Item", tags=["tag1"], collections=["COL123"], note="Test note content")
+    assert resp["key"] == "ITEM123"
+
+
+def test_add_related(client, mock_plugin):
+    """Test adding related items link."""
+    mock_plugin.post("/items/ITEM123/related").mock(return_value=Response(200, json={"success": True}))
+
+    resp = client.add_related("ITEM123", ["REL123", "REL456"])
+    assert resp["success"] is True

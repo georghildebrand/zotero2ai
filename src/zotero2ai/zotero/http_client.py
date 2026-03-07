@@ -40,7 +40,7 @@ class ZoteroHTTPClient:
         else:
             port = os.getenv("ZOTERO_BRIDGE_PORT", "23120")
             self.base_url = f"http://127.0.0.1:{port}"
-        
+
         self.auth_token = token or auth_token or os.getenv("ZOTERO_MCP_TOKEN")
         self.timeout = timeout
         self._client: httpx.Client | None = None
@@ -218,10 +218,10 @@ class ZoteroHTTPClient:
     # Tags
     def get_tags(self, library_id: int | None = None) -> list[str]:
         """Get all tags in a library.
-        
+
         Args:
             library_id: Library ID to get tags from (optional)
-            
+
         Returns:
             List of tag names
         """
@@ -233,12 +233,12 @@ class ZoteroHTTPClient:
 
     def rename_tag(self, old_name: str, new_name: str, library_id: int | None = None) -> dict[str, Any]:
         """Rename a tag library-wide.
-        
+
         Args:
             old_name: Current tag name
             new_name: New tag name
             library_id: Library ID (optional, applies to all libraries if not specified)
-            
+
         Returns:
             Success response
         """
