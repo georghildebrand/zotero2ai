@@ -391,14 +391,56 @@ def create_mcp_server() -> FastMCP:
             return f"Error getting collection attachments: {str(e)}"
 
     @mcp.tool()
-    def set_active_collection(key: str, full_path: str = "") -> str:
-        """Select a collection as 'active' for future notes and searches."""
+    def memory_set_active_project(project_slug: str, root_name: str = "Agent Memory") -> str:
+        """Select a project slug as 'active' for future memory items.
+        
+        This persists the project choice in Zotero (under _System/Settings), 
+        so agents will by default save new memory units to this project.
+        """
         try:
-            manager = ActiveCollectionManager()
-            manager.set_active_collection(key, full_path)
-            return f"Set active collection to: {full_path or key}"
+            with get_client() as client:
+                mm = MemoryManager(client)
+                cols = mm.ensure_collections(root_name=root_name)
+                settings = mm.get_settings(cols["system"])
+                settings["active_project_slug"] = project_slug
+                mm.update_settings(cols["system"], settings)
+                return f"Successfully set active memory project to: {project_slug} in Zotero."
         except Exception as e:
-            return f"Error setting active collection: {str(e)}"
+            return f"Error setting active project: {str(e)}"
+
+    @mcp.tool()
+    def memory_update_project_mapping(
+        project_slug: str, 
+        nickname: str | None = None, 
+        related_collections: list[str] | None = None,
+        root_name: str = "Agent Memory"
+    ) -> str:
+        """Update the mapping/metadata for a memory project.
+        
+        Use this to store project nicknames or link 'normal' Zotero collections 
+        (like library collections) to an agent memory project.
+        """
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                cols = mm.ensure_collections(root_name=root_name)
+                settings = mm.get_settings(cols["system"])
+                
+                if "projects" not in settings:
+                    settings["projects"] = {}
+                
+                if project_slug not in settings["projects"]:
+                    settings["projects"][project_slug] = {}
+                
+                if nickname:
+                    settings["projects"][project_slug]["nickname"] = nickname
+                if related_collections is not None:
+                    settings["projects"][project_slug]["related_collections"] = related_collections
+                
+                mm.update_settings(cols["system"], settings)
+                return f"Successfully updated mapping for project '{project_slug}' in Zotero."
+        except Exception as e:
+            return f"Error updating project mapping: {str(e)}"
 
     @mcp.tool()
     def get_active_collection() -> str:
@@ -690,10 +732,10 @@ def create_mcp_server() -> FastMCP:
                 active_col_key = manager.get_active_collection_key()
                 active_col_path = manager.get_active_collection_path()
 
-                # Check if registry exists to report status
-                registry_title = "[MEM][system][global] Tag Registry"
-                items = client.search_items(tag="mem:role:global", collection_key=cols["system"])
                 registry_ready = any(i["title"] == registry_title for i in items)
+
+                settings = mm.get_settings(cols["system"])
+                active_project_slug = settings.get("active_project_slug")
 
                 context = {
                     "root_collection": root_name,
@@ -701,6 +743,8 @@ def create_mcp_server() -> FastMCP:
                     "system_key": cols["system"],
                     "active_project_key": active_col_key,
                     "active_project_path": active_col_path,
+                    "active_project_slug": active_project_slug,
+                    "project_mappings": settings.get("projects", {}),
                     "write_policy": "Append-only for agent memories. User has full control. Metadata block in note is canonical source of truth.",
                     "registry_status": "Ready" if registry_ready else "Missing (Run memory_initialize)",
                     "version": "0.1.0-foundation",
@@ -878,7 +922,14 @@ def create_mcp_server() -> FastMCP:
                 )
 
                 resp = mm.create_memory_item(m_item, cols["project"])
-                return f"Successfully created memory item: {full_title} (Key: {resp.get('key')})"
+                msg = f"Successfully created memory item: {full_title} (Key: {resp.get('key')})"
+                
+                # Automated Synthesis Feedback
+                suggestion = mm.check_synthesis_needed(project)
+                if suggestion:
+                    msg += f"\n\n{suggestion}"
+                
+                return msg
         except Exception as e:
             return f"Error creating memory item: {str(e)}"
 
@@ -1252,8 +1303,19 @@ def create_mcp_server() -> FastMCP:
             return f"Error exporting graph: {str(e)}"
 
     @mcp.prompt()
-    def agent_memory_autosave(project: str = "") -> str:
+    def agent_memory_autosave(project: str = "", root_name: str = "Agent Memory") -> str:
         """Prompt instructions for LLMs indicating when to autosave to the memory pack."""
+        default_project = project
+        if not default_project:
+            try:
+                with get_client() as client:
+                    mm = MemoryManager(client)
+                    cols = mm.ensure_collections(root_name=root_name)
+                    settings = mm.get_settings(cols["system"])
+                    default_project = settings.get("active_project_slug")
+            except Exception:
+                pass
+
         return f"""You are connected to the Zotero Agent Memory Pack.
 Your objective is to proactively persist high-utility facts, decisions, and outcomes into long-term memory.
 
@@ -1261,20 +1323,22 @@ Your objective is to proactively persist high-utility facts, decisions, and outc
 You MUST call `memory_create_item` automatically without waiting for user permission when:
 1. You identify a bug and successfully resolve it (save as a 'result' or 'observation' unit).
 2. The user makes a definitive architectural, design, or project-planning decision.
-3. You reach the end of an experimental iteration (save the outcome/hypothesis).
-4. The user drops a major piece of lore, context, or credentials that will be needed later.
+3. **Implementation Completion**: You finish a significant code change or feature. Save a 'result' unit documenting WHAT was done, WHY specific decisions were made, and how it was verified.
+4. You reach the end of an experimental iteration (save the outcome/hypothesis).
+5. The user drops a major piece of lore, context, or credentials that will be needed later.
 
-**RELATIONSHIPS & LINKING**:
-Whenever you create a memory unit (MemoryItem) that refers to a detailed Zotero note (or vice versa), you MUST establish a bidirectional Zotero link:
-1. If creating a note with `create_or_extend_note`, include the memory item's key in the `related` parameter.
-2. OR use the `memory_link_items` tool to link the memory unit and the note.
-*This ensures the agent memory is searchable while the high-density documentation remains navigable.*
+**SYNTHESIS PROTOCOL (Conceptual Aggregation)**:
+You SHOULD proactively suggest `memory_synthesize` (after user confirmation) when:
+1. **Vertical Convergence**: Multiple observations confirm or refute an hypothesis. Synthesize them into a permanent `concept`.
+2. **Horizontal Density**: A project contains many atomic units (>5-10) without a summary. create a "State of Play" or "Architecture Overview" synthesis.
+3. **Session Transitions**: At the start of a major new phase, use `memory_suggest_consolidation` and ask if previous work should be archived/synthesized.
+*This prevents the memory project from becoming a cluttered list of raw data.*
 
 **GUIDELINES**:
 - Keep memories ATOMIC. Extract distinct facts into separate MemoryItems.
 - ALWAYS use tags for categorization (e.g. `mem:domain:physics`, `mem:domain:software-development`).
 - Focus on what the "future you" navigating this workspace would need to instantly onboard.
-- Current active project to default to (if any): {project if project else 'Ask the user or infer from context'}
+- Current active project to default to (if any): {default_project if default_project else 'Ask the user or infer from context'}
 """
 
     return mcp

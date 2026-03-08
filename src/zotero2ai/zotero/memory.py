@@ -651,3 +651,91 @@ class MemoryManager:
                     lines.append(f"  {rk} --> {key};")
                     
         return "\n".join(lines)
+    def get_settings(self, system_collection_key: str) -> dict[str, Any]:
+        """Load persistent settings from the _System collection."""
+        settings_title = "[MEM][system][global] Settings"
+        
+        # Search for the settings item
+        items = self.client.search_items(tag="mem:role:global", collection_key=system_collection_key)
+        settings_item = next((i for i in items if i["title"] == settings_title), None)
+        
+        if not settings_item:
+            return {}
+            
+        # Get the child note
+        notes = self.client.get_notes(parent_item_key=settings_item["key"])
+        if not notes:
+            return {}
+            
+        # Extract YAML from <pre> or raw text
+        note_content = notes[0]["note"]
+        import re
+        pre_match = re.search(r"<pre>(.*?)</pre>", note_content, re.DOTALL)
+        yaml_content = pre_match.group(1) if pre_match else note_content
+        
+        try:
+            settings = yaml.safe_load(yaml_content)
+            return cast(dict[str, Any], settings) if settings else {}
+        except Exception:
+            return {}
+
+    def update_settings(self, system_collection_key: str, settings: dict[str, Any]) -> None:
+        """Update or create persistent settings in the _System collection."""
+        settings_title = "[MEM][system][global] Settings"
+        
+        # 1. Check if it exists
+        items = self.client.search_items(tag="mem:role:global", collection_key=system_collection_key)
+        settings_item = next((i for i in items if i["title"] == settings_title), None)
+        
+        yaml_content = yaml.dump(settings, default_flow_style=False)
+        note_html = f"<pre>{yaml_content}</pre><hr/><p>Persistent Settings for Zotero Agent Memory Pack.</p>"
+        
+        if settings_item:
+            # Update child note
+            notes = self.client.get_notes(parent_item_key=settings_item["key"])
+            if notes:
+                self.client.update_note(notes[0]["key"], note_html)
+            else:
+                self.client.create_note(note_html, parent_item_key=settings_item["key"])
+        else:
+            # Create new item with note
+            self.client.create_item(
+                item_type="report",
+                title=settings_title,
+                tags=["mem:class:system", "mem:role:global"],
+                collections=[system_collection_key],
+            )
+
+    def check_synthesis_needed(self, project: str, unit_limit: int = 7) -> str | None:
+        """Check if a project needs a synthesis/aggregation.
+        
+        Returns a recommendation message if needed, else None.
+        """
+        try:
+            # Fetch recent items for this project
+            items = self.recall(project_slug=project, limit=20)
+            
+            if not items:
+                return None
+                
+            active_units = [i for i in items if i.get("mem_class") == "unit" and i.get("state") == "active"]
+            superseded = [i for i in items if i.get("state") == "superseded"]
+            
+            # 1. Horizontal Density check
+            if len(active_units) >= unit_limit:
+                return (
+                    f"NOTE: Synthesis Recommended! This project now has {len(active_units)} active memory units. "
+                    "Consider using `memory_synthesize` to consolidate these into a higher-level concept "
+                    "to maintain clarity."
+                )
+                
+            # 2. Superseding Patterns check
+            if len(superseded) >= 5 and len(superseded) > len(active_units):
+                return (
+                    "NOTE: Synthesis Recommended! There is a high count of superseded items in this project. "
+                    "Consider consolidating the lineage of changes into a single 'concept' to define the current truth."
+                )
+        except Exception as e:
+            logger.warning(f"Error checking synthesis needs: {e}")
+            
+        return None
