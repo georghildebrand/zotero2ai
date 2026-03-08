@@ -186,14 +186,14 @@ def create_mcp_server() -> FastMCP:
         If neither is provided and an active collection is set, it uses that.
         """
         try:
-            if not collection_key and not parent_item_key:
-                manager = ActiveCollectionManager()
-                collection_key = manager.get_active_collection_key()
-
-            if not collection_key and not parent_item_key:
-                return "Error: Provide a collection_key, parent_item_key, or set an active collection first."
-
             with get_client() as client:
+                if not collection_key and not parent_item_key:
+                    manager = ActiveCollectionManager(client)
+                    collection_key = manager.get_active_collection_key()
+
+                if not collection_key and not parent_item_key:
+                    return "Error: Provide a collection_key, parent_item_key, or set an active collection first."
+
                 notes = client.get_notes(collection_key=collection_key, parent_item_key=parent_item_key)
                 if not notes:
                     return "No notes found for the given criteria."
@@ -259,7 +259,7 @@ def create_mcp_server() -> FastMCP:
 
                 # Fallback to active collection if creating new and no collection provided
                 if not collection_key and not parent_item_key:
-                    manager = ActiveCollectionManager()
+                    manager = ActiveCollectionManager(client)
                     collection_key = manager.get_active_collection_key()
 
                 result = client.create_note(content=content, parent_item_key=parent_item_key, collections=[collection_key] if collection_key else None, tags=tags)
@@ -443,14 +443,34 @@ def create_mcp_server() -> FastMCP:
             return f"Error updating project mapping: {str(e)}"
 
     @mcp.tool()
+    def set_active_collection(key: str, full_path: str = "") -> str:
+        """Set a default collection for new notes and listing.
+        
+        Args:
+            key: The Zotero collection key.
+            full_path: Optional human-readable path for the collection.
+        """
+        try:
+            with get_client() as client:
+                manager = ActiveCollectionManager(client)
+                manager.set_active_collection(key, full_path)
+                return f"Successfully set active collection to: {full_path or key}"
+        except Exception as e:
+            return f"Error setting active collection: {str(e)}"
+
+    @mcp.tool()
     def get_active_collection() -> str:
         """Get the currently selected active collection."""
-        manager = ActiveCollectionManager()
-        key = manager.get_active_collection_key()
-        path = manager.get_active_collection_path()
-        if not key:
-            return "No active collection selected."
-        return f"Active Collection: {path or 'N/A'} (Key: {key})"
+        try:
+            with get_client() as client:
+                manager = ActiveCollectionManager(client)
+                key = manager.get_active_collection_key()
+                path = manager.get_active_collection_path()
+                if not key:
+                    return "No active collection selected."
+                return f"Active Collection: {path or 'N/A'} (Key: {key})"
+        except Exception as e:
+            return f"Error getting active collection: {str(e)}"
 
     @mcp.tool()
     def list_tags() -> str:
@@ -728,10 +748,12 @@ def create_mcp_server() -> FastMCP:
                 # Try to determine active project from active collection
                 from zotero2ai.zotero.collections import ActiveCollectionManager
 
-                manager = ActiveCollectionManager()
+                manager = ActiveCollectionManager(client)
                 active_col_key = manager.get_active_collection_key()
                 active_col_path = manager.get_active_collection_path()
 
+                registry_title = "[MEM][system][global] Tag Registry"
+                items = client.search_items(tag="mem:role:global", collection_key=cols["system"])
                 registry_ready = any(i["title"] == registry_title for i in items)
 
                 settings = mm.get_settings(cols["system"])
