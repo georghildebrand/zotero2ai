@@ -211,9 +211,8 @@ class MemoryManager:
         if project_slug:
             cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
             collection_key = cols.get("project")
-        else:
-            cols = self.ensure_collections(root_name=root_name)
-            collection_key = cols.get("root")
+        # If no project_slug, we leave collection_key as None to search the whole library
+        # (scoped by tags later). This ensures we find items in any project subcollection.
 
         # Zotero search indices can be milliseconds to seconds delayed behind DB transactions.
         # To ensure the agent can reliably recall items it JUST superseded/synthesized,

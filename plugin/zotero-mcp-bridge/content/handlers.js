@@ -761,7 +761,9 @@ var RequestHandlers = class {
                     tags: tags,
                     collections: item.getCollections(), // getCollections usually safe, returns array of keys
                     related: related,
-                    attachments: attachments
+                    attachments: attachments,
+                    dateAdded: item.dateAdded,
+                    dateModified: item.dateModified
                 };
 
                 // For attachment items, include the file path and content type at the top level
