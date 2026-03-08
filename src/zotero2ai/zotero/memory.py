@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from zotero2ai.zotero.models import MemoryItem
 from zotero2ai.zotero.plugin_client import PluginClient
+from zotero2ai.zotero.utils import normalize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ class MemoryManager:
         # Filter by class and role in Python if provided
         filtered = []
         for item in results:
-            tags = item.get("tags", [])
+            tags = normalize_tags(item.get("tags", []))
             if mem_class and f"mem:class:{mem_class}" not in tags:
                 continue
             if role and f"mem:role:{role}" not in tags:

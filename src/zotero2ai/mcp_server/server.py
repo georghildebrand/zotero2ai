@@ -197,6 +197,36 @@ def create_mcp_server() -> FastMCP:
             return f"Error reading note: {str(e)}"
 
     @mcp.tool()
+    def list_notes(collection_key: str | None = None, parent_item_key: str | None = None) -> str:
+        """List notes from Zotero.
+
+        If neither collection_key nor parent_item_key is provided, falls back to the active collection
+        (if one is set via settings).
+        """
+        try:
+            with get_client() as client:
+                manager = ActiveCollectionManager(client)
+
+                if not collection_key and not parent_item_key:
+                    collection_key = manager.get_active_collection_key()
+
+                if not collection_key and not parent_item_key:
+                    return "Error: Provide a collection_key, parent_item_key, or set an active collection first."
+
+                notes = client.get_notes(collection_key=collection_key, parent_item_key=parent_item_key)
+                if not notes:
+                    return "No notes found for the given criteria."
+
+                lines = []
+                for note in notes:
+                    friendly_name = generate_friendly_name(note.get("note", ""))
+                    lines.append(f"- {friendly_name} ({note['key']})")
+
+                return "Available Notes:\n" + "\n".join(lines)
+        except Exception as e:
+            return f"Error listing notes: {str(e)}"
+
+    @mcp.tool()
     def list_notes_recursive(
         collection_key: str,
         date_from: str | None = None,
@@ -1351,4 +1381,3 @@ You SHOULD proactively suggest `memory_synthesize` (after user confirmation) whe
 """
 
     return mcp
-

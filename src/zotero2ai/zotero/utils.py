@@ -92,3 +92,30 @@ def generate_friendly_name(content: str, max_length: int = 50) -> str:
         return truncated[:last_space].strip() + "..."
 
     return truncated.strip() + "..."
+
+
+def normalize_tags(raw_tags: object) -> list[str]:
+    """Normalize Zotero tag payloads to a list of tag strings.
+
+    The bridge can return tags as either:
+    - list[str]
+    - list[dict] with shape {"tag": "..."}
+    - None / empty
+    """
+    if raw_tags is None:
+        return []
+    if not isinstance(raw_tags, list):
+        return []
+
+    normalized: list[str] = []
+    for tag in raw_tags:
+        if isinstance(tag, dict):
+            value = tag.get("tag", "")
+            if isinstance(value, str) and value:
+                normalized.append(value)
+            continue
+        if isinstance(tag, str) and tag:
+            normalized.append(tag)
+            continue
+        normalized.append(str(tag))
+    return normalized

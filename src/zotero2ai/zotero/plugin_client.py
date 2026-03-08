@@ -118,10 +118,18 @@ class PluginClient:
             if response.status_code == 401:
                 raise PluginAuthError("Authentication failed. Check that ZOTERO_MCP_TOKEN matches the plugin's token.")
 
-            # Raise for other HTTP errors
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Include the response body for easier debugging (common when notes/related updates fail).
+                body = ""
+                try:
+                    body = response.text.strip()
+                except Exception:
+                    body = ""
+                message = f"{e}\nResponse body: {body or '<empty response body>'}"
+                raise httpx.HTTPStatusError(message, request=e.request, response=e.response) from e
 
-            # Parse JSON response
             return cast(dict[str, Any], response.json())
 
         except httpx.ConnectError as e:
@@ -569,4 +577,3 @@ class PluginClient:
             body["collections"] = collections
 
         return self._request("PUT", f"/items/{key}", json=body)
-
