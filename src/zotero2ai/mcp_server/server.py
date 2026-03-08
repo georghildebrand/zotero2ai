@@ -396,15 +396,28 @@ def create_mcp_server() -> FastMCP:
         
         This persists the project choice in Zotero (under _System/Settings), 
         so agents will by default save new memory units to this project.
+        Automatically switches the active collection if a mapping exists.
         """
         try:
             with get_client() as client:
                 mm = MemoryManager(client)
                 cols = mm.ensure_collections(root_name=root_name)
                 settings = mm.get_settings(cols["system"])
+                
                 settings["active_project_slug"] = project_slug
+                
+                # Auto-switch active collection if it is defined in project metadata
+                project_meta = settings.get("projects", {}).get(project_slug, {})
+                active_col_key = project_meta.get("active_collection_key")
+                
+                info_msg = ""
+                if active_col_key:
+                    settings["active_collection_key"] = active_col_key
+                    settings["active_collection_path"] = project_meta.get("active_collection_path", "")
+                    info_msg = f" Also switched active collection to: {settings['active_collection_path']}"
+                
                 mm.update_settings(cols["system"], settings)
-                return f"Successfully set active memory project to: {project_slug} in Zotero."
+                return f"Successfully set active memory project to: {project_slug} in Zotero.{info_msg}"
         except Exception as e:
             return f"Error setting active project: {str(e)}"
 
@@ -413,6 +426,8 @@ def create_mcp_server() -> FastMCP:
         project_slug: str, 
         nickname: str | None = None, 
         related_collections: list[str] | None = None,
+        active_collection_key: str | None = None,
+        active_collection_path: str | None = None,
         root_name: str = "Agent Memory"
     ) -> str:
         """Update the mapping/metadata for a memory project.
@@ -436,6 +451,10 @@ def create_mcp_server() -> FastMCP:
                     settings["projects"][project_slug]["nickname"] = nickname
                 if related_collections is not None:
                     settings["projects"][project_slug]["related_collections"] = related_collections
+                if active_collection_key:
+                    settings["projects"][project_slug]["active_collection_key"] = active_collection_key
+                if active_collection_path:
+                    settings["projects"][project_slug]["active_collection_path"] = active_collection_path
                 
                 mm.update_settings(cols["system"], settings)
                 return f"Successfully updated mapping for project '{project_slug}' in Zotero."
