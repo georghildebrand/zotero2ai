@@ -740,6 +740,370 @@ class MemoryManager:
             
         return None
 
+    def list_notes_recursive(
+        self,
+        collection_key: str,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        include_content: bool = False,
+        query: str | None = None,
+        max_items: int = 500,
+        cursor: int = 0,
+    ) -> dict[str, Any]:
+        """Traverse a collection tree and return all notes with metadata.
+
+        Traverses the collection subtree rooted at collection_key server-side,
+        fetching notes from every subcollection in one call instead of requiring
+        the agent to call list_collections + list_notes per subcollection.
+
+        Args:
+            collection_key: Root collection key. Use 'root' for the full library.
+            date_from: ISO 8601 date string – only notes modified after this date.
+            date_to: ISO 8601 date string – only notes modified before this date.
+            include_content: If True, fetch and include HTML + plain-text content.
+            query: Optional substring filter on note title.
+            max_items: Maximum number of notes to return (default: 500).
+            cursor: Pagination offset into the flat result set.
+
+        Returns:
+            {
+              "items": [...],
+              "total": N,          # total matching before cursor/max_items slice
+              "next_cursor": M | null
+            }
+        """
+        from zotero2ai.zotero.utils import clean_html
+
+        # 1. Build flat list of all (collection_key, collection_path) pairs to visit
+        tree = self.client.get_collection_tree(depth=99)
+        collection_map: dict[str, str] = {}  # key -> path
+
+        def _collect_subtree(nodes: list[dict[str, Any]], target_found: bool) -> None:
+            for node in nodes:
+                node_key = node.get("key", "")
+                node_path = node.get("path", node.get("name", ""))
+                if collection_key == "root" or target_found or node_key == collection_key:
+                    collection_map[node_key] = node_path
+                    _collect_subtree(node.get("children", []), True)
+                else:
+                    _collect_subtree(node.get("children", []), False)
+
+        _collect_subtree(tree, collection_key == "root")
+
+        # Fallback: if the key wasn't found in the tree, still try it directly
+        if not collection_map and collection_key != "root":
+            collection_map[collection_key] = collection_key
+
+        # 2. Fetch notes from each collection
+        all_notes: list[dict[str, Any]] = []
+        visited_keys: set[str] = set()
+
+        for col_key, col_path in collection_map.items():
+            try:
+                raw_notes = self.client.get_notes(collection_key=col_key)
+            except Exception as e:
+                logger.warning(f"Could not fetch notes for collection {col_key}: {e}")
+                continue
+
+            for note in raw_notes:
+                note_key = note.get("key", "")
+                if note_key in visited_keys:
+                    continue
+                visited_keys.add(note_key)
+
+                # Date filtering (use dateModified if available, else dateAdded)
+                note_date = note.get("dateModified") or note.get("dateAdded") or ""
+                if date_from and note_date and note_date < date_from:
+                    continue
+                if date_to and note_date and note_date > date_to:
+                    continue
+
+                # Title query filter
+                title = note.get("title") or f"Note ({note_key})"
+                if query and query.lower() not in title.lower():
+                    continue
+
+                entry: dict[str, Any] = {
+                    "note_key": note_key,
+                    "title": title,
+                    "created": note.get("dateAdded", ""),
+                    "modified": note.get("dateModified", ""),
+                    "collection_key": col_key,
+                    "collection_path": col_path,
+                    "parent_item_key": note.get("parentItem") or note.get("parentItemKey"),
+                }
+
+                if include_content:
+                    try:
+                        full = self.client.get_note(note_key)
+                        html = full.get("note", "")
+                        entry["content_html"] = html
+                        entry["content_plain"] = clean_html(html) if html else ""
+                    except Exception as e:
+                        logger.warning(f"Could not fetch content for note {note_key}: {e}")
+                        entry["content_html"] = ""
+                        entry["content_plain"] = ""
+
+                all_notes.append(entry)
+
+        # 3. Sort by modified desc
+        all_notes.sort(key=lambda n: n.get("modified") or n.get("created") or "", reverse=True)
+
+        total = len(all_notes)
+        page = all_notes[cursor: cursor + max_items]
+        next_cursor: int | None = cursor + max_items if cursor + max_items < total else None
+
+        return {
+            "items": page,
+            "total": total,
+            "next_cursor": next_cursor,
+        }
+
+    def bulk_create_memory_items(
+        self,
+        items: list[dict[str, Any]],
+        dry_run: bool = False,
+        allow_concepts: bool = False,
+        root_name: str = "Agent Memory",
+    ) -> dict[str, Any]:
+        """Create multiple memory items in a single call.
+
+        Validates all items first (tag normalisation, class gating), then writes
+        them in sequence. Supports dry_run mode and per-item idempotency keys.
+
+        Args:
+            items: List of item dicts. Required keys: project, mem_class, role,
+                   title_label, content. Optional: tags, confidence, source,
+                   idempotency_key.
+            dry_run: If True, only validate – do not write to Zotero.
+            allow_concepts: If True, allow mem_class in ['concept','synthesis'].
+                            Default is False (only 'unit' class without explicit opt-in).
+            root_name: Root collection name for Agent Memory.
+
+        Returns:
+            {
+              "dry_run": bool,
+              "total": int,
+              "created": int,
+              "skipped_duplicates": int,
+              "errors": [...],
+              "items": [{"idempotency_key", "key", "title", "status", "reason?"}]
+            }
+        """
+        # --- Phase 1: Validate all items ---
+        registry: dict[str, Any] | None = None
+        col_cache: dict[str, str] = {}  # project_slug -> project collection key
+        system_key: str | None = None
+
+        # Load registry once
+        try:
+            bootstrap = self.ensure_collections(root_name=root_name)
+            system_key = bootstrap.get("system")
+            if system_key:
+                registry = self.get_registry(system_key)
+        except Exception as e:
+            return {
+                "dry_run": dry_run,
+                "total": len(items),
+                "created": 0,
+                "skipped_duplicates": 0,
+                "errors": [f"Cannot load registry: {e}"],
+                "items": [],
+            }
+
+        validation_errors: list[str] = []
+        validated: list[dict[str, Any]] = []  # items that pass validation
+
+        CONCEPT_CLASSES = {"concept", "synthesis"}
+
+        for idx, raw in enumerate(items):
+            label = raw.get("idempotency_key") or raw.get("title_label") or f"item[{idx}]"
+
+            # Required field check
+            for req in ("project", "mem_class", "role", "title_label", "content"):
+                if not raw.get(req):
+                    validation_errors.append(f"{label}: missing required field '{req}'")
+                    validated.append({"idempotency_key": label, "status": "error", "reason": f"missing '{req}'"})
+                    break
+            else:
+                mem_class = raw["mem_class"]
+                role = raw["role"]
+                project = raw["project"]
+
+                # Concept gating
+                if not allow_concepts and mem_class in CONCEPT_CLASSES:
+                    validation_errors.append(
+                        f"{label}: mem_class='{mem_class}' requires allow_concepts=True. "
+                        "Use dry_run=True first, then re-submit with allow_concepts=True after user approval."
+                    )
+                    validated.append({"idempotency_key": label, "status": "error", "reason": "concept class not allowed"})
+                    continue
+
+                # Tag validation
+                extra_tags = raw.get("tags") or []
+                base_tags = [f"mem:class:{mem_class}", f"mem:role:{role}", f"mem:project:{project}"]
+                all_tags = base_tags + extra_tags
+
+                tag_error: str | None = None
+                if registry:
+                    try:
+                        self.validate_tags(all_tags, registry)
+                    except ValueError as ve:
+                        tag_error = str(ve)
+
+                if tag_error:
+                    validation_errors.append(f"{label}: {tag_error}")
+                    validated.append({"idempotency_key": label, "status": "error", "reason": tag_error})
+                    continue
+
+                validated.append({"_raw": raw, "idempotency_key": label, "status": "pending"})
+
+        if dry_run:
+            pending = [v for v in validated if v.get("status") == "pending"]
+            errors = [v for v in validated if v.get("status") == "error"]
+            return {
+                "dry_run": True,
+                "total": len(items),
+                "would_create": len(pending),
+                "validation_errors": len(errors),
+                "errors": validation_errors,
+                "items": [{k: v for k, v in item.items() if k != "_raw"} for item in validated],
+            }
+
+        # --- Phase 2: Write valid items ---
+        created_count = 0
+        skipped_count = 0
+        write_errors: list[str] = []
+        result_items: list[dict[str, Any]] = []
+        affected_projects: set[str] = set()
+
+        for item_meta in validated:
+            if item_meta.get("status") != "pending":
+                result_items.append({k: v for k, v in item_meta.items() if k != "_raw"})
+                continue
+
+            raw = item_meta["_raw"]
+            label = item_meta["idempotency_key"]
+            project = raw["project"]
+            idempotency_key = raw.get("idempotency_key")
+
+            # Idempotency check: search by key in note content
+            if idempotency_key:
+                try:
+                    existing = self.client.search_items(query=idempotency_key, limit=3)
+                    if any(idempotency_key in (i.get("title", "") + i.get("extra", "")) for i in existing):
+                        skipped_count += 1
+                        result_items.append({"idempotency_key": label, "status": "skipped", "reason": "duplicate"})
+                        continue
+                except Exception:
+                    pass  # If check fails, proceed with creation
+
+            # Resolve collection (cached per project)
+            if project not in col_cache:
+                try:
+                    cols = self.ensure_collections(root_name=root_name, project_slug=project)
+                    col_cache[project] = cols["project"]
+                except Exception as e:
+                    write_errors.append(f"{label}: could not resolve collection for project '{project}': {e}")
+                    result_items.append({"idempotency_key": label, "status": "error", "reason": str(e)})
+                    continue
+
+            project_col_key = col_cache[project]
+
+            # Build MemoryItem
+            try:
+                mem_id = MemoryItem.generate_mem_id(project)
+                full_title = f"[MEM][{raw['mem_class']}][{project}] {raw['title_label']}"
+
+                # Embed idempotency_key in content for future deduplication
+                content = raw["content"]
+                if idempotency_key:
+                    content = f"{content}\n\n<!-- idempotency: {idempotency_key} -->"
+
+                m_item = MemoryItem(
+                    mem_id=mem_id,
+                    mem_class=raw["mem_class"],
+                    role=raw["role"],
+                    project=project,
+                    title=full_title,
+                    content=content,
+                    source=raw.get("source", "agent"),
+                    confidence=raw.get("confidence", "medium"),
+                    tags=raw.get("tags") or [],
+                )
+
+                resp = self.create_memory_item(m_item, project_col_key)
+                created_count += 1
+                affected_projects.add(project)
+                result_items.append({
+                    "idempotency_key": label,
+                    "key": resp.get("key", ""),
+                    "title": full_title,
+                    "status": "created",
+                })
+            except Exception as e:
+                write_errors.append(f"{label}: {e}")
+                result_items.append({"idempotency_key": label, "status": "error", "reason": str(e)})
+
+        # Post-batch synthesis check for affected projects
+        synthesis_hints: list[str] = []
+        for proj in affected_projects:
+            try:
+                hint = self.check_synthesis_needed(proj)
+                if hint:
+                    synthesis_hints.append(hint)
+            except Exception:
+                pass
+
+        return {
+            "dry_run": False,
+            "total": len(items),
+            "created": created_count,
+            "skipped_duplicates": skipped_count,
+            "errors": validation_errors + write_errors,
+            "items": result_items,
+            "synthesis_hints": synthesis_hints,
+        }
+
+    def get_project_digest(self, collection_key: str, date_from: str | None = None) -> str:
+        """Aggregates all recent notes in a collection into a single Markdown document.
+        
+        This is designed to be fed directly to an agent to generate new Memory Items
+        and decision logs via bulk_memory_create.
+        """
+        # Fetch all notes including content, passing cursor=0 and a large limit
+        # In a real environment we might want to paginate, but for a digest we need everything up to a limit
+        res = self.list_notes_recursive(
+            collection_key=collection_key,
+            date_from=date_from,
+            include_content=True,
+            max_items=200
+        )
+        items = res.get("items", [])
+        
+        if not items:
+            return f"No notes found in collection '{collection_key}' since {date_from or 'the beginning'}."
+            
+        lines = [
+            f"# Project Digest: Collection {collection_key}",
+            f"**Total Notes:** {len(items)}",
+            f"**Since:** {date_from or 'Anytime'}",
+            "\n---\n"
+        ]
+        
+        for idx, item in enumerate(items, 1):
+            lines.append(f"## [{idx}] {item.get('title', 'Untitled')} (Key: {item.get('note_key')})")
+            lines.append(f"**Modified:** {item.get('modified')} | **Path:** {item.get('collection_path')}\n")
+            
+            content = item.get("content_plain", "").strip()
+            if not content:
+                content = "*(No text content)*"
+                
+            lines.append(content)
+            lines.append("\n---\n")
+            
+        return "\n".join(lines)
+
     def get_period_review(
         self,
         period: str = "week",

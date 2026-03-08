@@ -180,34 +180,6 @@ def create_mcp_server() -> FastMCP:
             return f"Error fetching recent papers: {str(e)}"
 
     @mcp.tool()
-    def list_notes(collection_key: str | None = None, parent_item_key: str | None = None) -> str:
-        """List notes from Zotero. Use collection_key or parent_item_key to filter.
-
-        If neither is provided and an active collection is set, it uses that.
-        """
-        try:
-            with get_client() as client:
-                if not collection_key and not parent_item_key:
-                    manager = ActiveCollectionManager(client)
-                    collection_key = manager.get_active_collection_key()
-
-                if not collection_key and not parent_item_key:
-                    return "Error: Provide a collection_key, parent_item_key, or set an active collection first."
-
-                notes = client.get_notes(collection_key=collection_key, parent_item_key=parent_item_key)
-                if not notes:
-                    return "No notes found for the given criteria."
-
-                lines = []
-                for note in notes:
-                    friendly_name = generate_friendly_name(note.get("note", ""))
-                    lines.append(f"- {friendly_name} ({note['key']})")
-
-                return "Available Notes:\n" + "\n".join(lines)
-        except Exception as e:
-            return f"Error listing notes: {str(e)}"
-
-    @mcp.tool()
     def read_note(key: str) -> str:
         """Read the full content of a Zotero note by its key."""
         try:
@@ -225,6 +197,55 @@ def create_mcp_server() -> FastMCP:
             return f"Error reading note: {str(e)}"
 
     @mcp.tool()
+    def list_notes_recursive(
+        collection_key: str,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        include_content: bool = False,
+        query: str | None = None,
+        max_items: int = 200,
+        cursor: int = 0,
+    ) -> str:
+        """Bulk-read: traverse a collection subtree and return all notes in one call.
+
+        Replaces the pattern of calling list_collections + list_notes for each
+        subcollection. Ideal for ingesting a date-filtered slice of notes from
+        deep hierarchies (e.g. 'all meeting notes from the last 6 months').
+
+        Args:
+            collection_key: Collection to start from. Use 'root' for the entire library.
+            date_from: ISO 8601 date – only return notes modified after this date.
+            date_to: ISO 8601 date – only return notes modified before this date.
+            include_content: If True, each note includes content_html and content_plain.
+                             Warning: significantly slower for large result sets.
+            query: Optional substring to filter note titles.
+            max_items: Max notes per page (default: 200, max recommended: 500).
+            cursor: Pagination offset. Use next_cursor from a previous call.
+
+        Returns:
+            JSON with 'items', 'total', and 'next_cursor' (null if no more results).
+            Each item contains: note_key, title, created, modified, collection_key,
+            collection_path, parent_item_key, and optionally content_html / content_plain.
+        """
+        import json
+
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                result = mm.list_notes_recursive(
+                    collection_key=collection_key,
+                    date_from=date_from,
+                    date_to=date_to,
+                    include_content=include_content,
+                    query=query,
+                    max_items=max_items,
+                    cursor=cursor,
+                )
+                return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return f"Error in list_notes_recursive: {str(e)}"
+
+    @mcp.tool()
     def create_or_extend_note(
         content: str,
         note_key: str | None = None,
@@ -236,6 +257,14 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         """Create a new note or extend an existing one.
 
+        Semantics:
+        - note_key + extend=True  → append content to the existing note (tags updated if provided)
+        - note_key + extend=False → replace/upsert the entire note content
+        - no note_key             → create new note:
+            - parent_item_key: attaches note as child of that item
+            - collection_key: places note directly in that collection
+            - neither: uses the currently active collection (fallback)
+
         MANDATORY RELATIONSHIPS: Whenever you create a memory unit (memory_create_item) that
         refers to this note, you MUST include the memory item's key in the 'related' parameter
         to establish a bidirectional Zotero link. This ensures the agent memory is searchable
@@ -243,30 +272,56 @@ def create_mcp_server() -> FastMCP:
         """
         try:
             with get_client() as client:
+                # ── Case 1: Extend (append) existing note ──────────────────
                 if extend and note_key:
-                    # Extend doesn't support tags in the logic below, let's fix that or ignore tags on extend
-                    # Actually, we can update tags while extending
-                    result = client.extend_note(note_key, content)
-                    if tags:
-                        client.update_note(note_key, tags=tags)
-                    if related:
-                        client.update_note(note_key, related=related)
+                    client.extend_note(note_key, content)
+                    # Apply optional tag/related updates in one call after extend
+                    if tags or related:
+                        client.update_note(note_key, tags=tags or None, related=related or None)
                     return f"Successfully extended note {note_key}."
 
+                # ── Case 2: Replace/upsert existing note ───────────────────
                 if note_key:
-                    result = client.update_note(note_key, content=content, tags=tags, related=related)
+                    client.update_note(
+                        note_key,
+                        content=content,
+                        tags=tags if tags else None,
+                        related=related if related else None,
+                    )
                     return f"Successfully updated note {note_key}."
 
-                # Fallback to active collection if creating new and no collection provided
-                if not collection_key and not parent_item_key:
+                # ── Case 3: Create new note ────────────────────────────────
+                # Resolve target: parent_item_key > collection_key > active collection
+                target_collection: str | None = collection_key
+                if not target_collection and not parent_item_key:
                     manager = ActiveCollectionManager(client)
-                    collection_key = manager.get_active_collection_key()
+                    target_collection = manager.get_active_collection_key()
+                    if not target_collection:
+                        return (
+                            "Error: cannot create note – provide parent_item_key, collection_key, "
+                            "or set an active collection first via set_active_collection."
+                        )
 
-                result = client.create_note(content=content, parent_item_key=parent_item_key, collections=[collection_key] if collection_key else None, tags=tags)
-                new_key = result.get("key", "unknown")
+                result = client.create_note(
+                    content=content,
+                    parent_item_key=parent_item_key,
+                    collections=[target_collection] if target_collection else None,
+                    tags=tags if tags else None,
+                )
+                new_key = result.get("key", "")
 
-                if related and new_key != "unknown":
-                    client.update_note(new_key, related=related)
+                if not new_key:
+                    return f"Error: note creation returned no key. Raw response: {result}"
+
+                # Set related links after creation (separate call required by Zotero API)
+                if related:
+                    try:
+                        client.update_note(new_key, related=related)
+                    except Exception as rel_err:
+                        return (
+                            f"Note created (key: {new_key}) but failed to set related links: {rel_err}. "
+                            "You can retry with memory_link_items."
+                        )
 
                 return f"Successfully created new note. Key: {new_key}"
         except Exception as e:
@@ -640,121 +695,6 @@ def create_mcp_server() -> FastMCP:
             return f"Error getting item content: {str(e)}"
 
     @mcp.tool()
-    def export_collection_to_markdown(collection_key: str, output_path: str | None = None) -> str:
-        """Export all items in a collection (metadata + full text) to a single Markdown file.
-
-        The file is saved to the specified output_path. If not provided, it defaults to
-        ~/Downloads/zotero_export_{collection_key}.md.
-
-        This fetches the full text content (from PDFs or snapshots) for each item in the collection.
-        Note: This may take a few seconds for large collections (max 500 items).
-
-        Args:
-            collection_key: The key of the collection to export.
-            output_path: Optional full path for the output file.
-        """
-        try:
-            with get_client() as client:
-                # 1. Get Items
-                # Limit set to 500 to capture most collections
-                items = client.get_collection_items(collection_key, limit=500)
-
-                if not items:
-                    return f"No items found in collection {collection_key}."
-
-                # 2. Prepare Markdown content
-                from datetime import datetime
-
-                markdown_lines = [f"# Collection Export: {collection_key}", f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", f"Total Items: {len(items)}", "", "---"]
-
-                success_count = 0
-
-                for item in items:
-                    title = item.get("title", "Untitled")
-                    key: str = item.get("key") or ""
-                    creators = ", ".join(item.get("creators", []))
-                    date = item.get("date", "")
-                    item_type = item.get("itemType", "unknown")
-                    url = item.get("url", "")
-
-                    markdown_lines.append(f"\n## {title}")
-                    markdown_lines.append(f"- **Key**: {key}")
-                    markdown_lines.append(f"- **Type**: {item_type}")
-                    if creators:
-                        markdown_lines.append(f"- **Creators**: {creators}")
-                    if date:
-                        markdown_lines.append(f"- **Date**: {date}")
-                    if url:
-                        markdown_lines.append(f"- **URL**: {url}")
-
-                    # Fetch content
-                    # If it's a note, use the note-specific logic.
-                    # If it's a regular item or attachment, use get_item_content.
-                    try:
-                        if item_type == "note":
-                            note_data = client.get_note(key or "")
-                            content = note_data.get("note", "")
-                            filename = generate_friendly_name(content)
-                            content_type = "text/html"
-                        else:
-                            content_data = client.get_item_content(key or "")
-                            content = content_data.get("content")
-                            filename = content_data.get("filename", "Unknown")
-                            content_type = content_data.get("contentType", "")
-
-                        if content:
-                            # If it's HTML, clean it up for the export (strip styles/scripts/etc)
-                            if content_type == "text/html" or filename.endswith(".html") or filename.endswith(".htm"):
-                                content = clean_html(content, preserve_newlines=True)
-
-                            markdown_lines.append(f"\n### Content ({filename})")
-                            markdown_lines.append("```text")
-                            markdown_lines.append(content)
-                            markdown_lines.append("```")
-                            success_count += 1
-                        else:
-                            # Try to check if it has attachments listed in metadata
-                            attachments = item.get("attachments", [])
-                            if attachments:
-                                att_names = [a.get("title", "Untitled") for a in attachments]
-                                markdown_lines.append(f"\n*(No text content extracted. Attachments: {', '.join(att_names)})*")
-                            else:
-                                markdown_lines.append("\n*(No content available)*")
-                    except Exception as e:
-                        markdown_lines.append(f"\n*(Error fetching content: {str(e)})*")
-
-                    markdown_lines.append("\n---\n")
-
-                # 3. Determine Output Path
-                from pathlib import Path
-
-                final_path: Path
-                if not output_path:
-                    # Safe filename
-                    from pathlib import Path
-
-                    safe_key = "".join([c for c in collection_key if c.isalnum() or c in ("-", "_")])
-                    filename = f"zotero_export_{safe_key}.md"
-                    final_path = Path.expanduser(Path("~/Downloads") / filename)
-                else:
-                    final_path = Path(output_path)
-
-                # 4. Write File
-                try:
-                    # Ensure directory exists
-                    final_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    with final_path.open("w", encoding="utf-8") as f:
-                        f.write("\n".join(markdown_lines))
-
-                    return f"Successfully exported {len(items)} items (content extracted for {success_count}) to:\n{final_path}"
-                except Exception as e:
-                    return f"Error writing file to {output_path}: {e}"
-
-        except Exception as e:
-            return f"Error trying to export collection: {str(e)}"
-
-    @mcp.tool()
     def memory_get_context(root_name: str = "Agent Memory") -> str:
         """Get the current memory context, including active project, write policy, and registry status."""
         import json
@@ -851,63 +791,6 @@ def create_mcp_server() -> FastMCP:
             return f"Error loading registry: {str(e)}"
 
     @mcp.tool()
-    def memory_list_projects(root_name: str = "Agent Memory") -> str:
-        """List all active memory projects in Zotero."""
-        try:
-            with get_client() as client:
-                mm = MemoryManager(client)
-                cols = mm.ensure_collections(root_name=root_name)
-                # Projects are subcollections of root, excluding _System
-                root_children = client.get_collections(parent_key=cols["root"])
-                projects = [c for c in root_children if c["name"] != "_System"]
-
-                if not projects:
-                    return "No memory projects found."
-
-                lines = ["Active Memory Projects:"]
-                for p in projects:
-                    lines.append(f"- {p['name']} (key: {p['key']})")
-                return "\n".join(lines)
-        except Exception as e:
-            return f"Error listing projects: {str(e)}"
-
-    @mcp.tool()
-    def memory_search(query: str | None = None, project: str | None = None, mem_class: str | None = None, role: str | None = None, limit: int = 20) -> str:
-        """Search for memory items with filters. Returns metadata and content.
-
-        Args:
-            query: Optional search text
-            project: Optional project slug (e.g., 'lora-geometry')
-            mem_class: Optional class (unit, concept, project, system)
-            role: Optional role (question, observation, hypothesis, result, synthesis)
-            limit: Max results
-        """
-        try:
-            with get_client() as client:
-                mm = MemoryManager(client)
-                results = mm.search_memory(query, project, mem_class, role, limit)
-
-                if not results:
-                    return "No matching memories found."
-
-                lines = [f"Found {len(results)} memory items:"]
-                for item in results:
-                    lines.append(f"\n### {item['title']} (key: {item['key']})")
-                    lines.append(f"- Project: {project or 'unknown'}")
-                    # Content is in child notes - we'd need to fetch child note for full content
-                    # For search results, we just show the title for now or fetch the first note
-                    notes = client.get_notes(parent_item_key=item["key"])
-                    if notes:
-                        content = clean_html(notes[0].get("note", ""))
-                        # Truncate content for search overview
-                        summary = (content[:300] + "...") if len(content) > 300 else content
-                        lines.append(f"\n{summary}")
-
-                return "\n".join(lines)
-        except Exception as e:
-            return f"Error searching memory: {str(e)}"
-
-    @mcp.tool()
     def memory_create_item(
         mem_class: str,
         role: str,
@@ -970,6 +853,70 @@ def create_mcp_server() -> FastMCP:
                 return msg
         except Exception as e:
             return f"Error creating memory item: {str(e)}"
+
+    @mcp.tool()
+    def bulk_memory_create(
+        items: list[dict],
+        dry_run: bool = False,
+        allow_concepts: bool = False,
+        root_name: str = "Agent Memory",
+    ) -> str:
+        """Bulk-write: create many memory units in a single MCP call.
+
+        Reduces tool calls by 30-200× when ingesting large sets of observations,
+        e.g. after processing a batch of meeting notes or during a project digest.
+
+        Workflow:
+        1. Call with dry_run=True to validate all items and inspect errors.
+        2. Fix any tag/field errors reported.
+        3. Re-call with dry_run=False to commit.
+
+        Args:
+            items: List of item dicts. Required per item:
+                   - project (str): project slug, e.g. 'centric-software'
+                   - mem_class (str): 'unit' (use allow_concepts=True for concept/synthesis)
+                   - role (str): 'observation' | 'result' | 'hypothesis' | 'question'
+                   - title_label (str): short label, becomes part of the Zotero title
+                   - content (str): full Markdown content for the note body
+                   Optional per item:
+                   - tags (list[str]): extra mem:domain:* or similar tags
+                   - confidence (str): 'high' | 'medium' | 'low'  (default: 'medium')
+                   - source (str): 'agent' | 'user' | 'paper' etc. (default: 'agent')
+                   - idempotency_key (str): stable unique string to prevent duplicates
+                     on re-runs. Embedded in note content as invisible marker.
+            dry_run: If True, validate but do NOT write to Zotero. Returns a
+                     validation report with would_create / validation_errors counts.
+            allow_concepts: If True, allow mem_class='concept' or 'synthesis'.
+                            Requires explicit opt-in to prevent accidental overwrites.
+            root_name: Root collection name for Agent Memory (default: 'Agent Memory').
+
+        Returns:
+            JSON report:
+            {
+              "dry_run": bool,
+              "total": int,
+              "created": int,           // only when dry_run=False
+              "would_create": int,      // only when dry_run=True
+              "skipped_duplicates": int,
+              "errors": ["item-label: reason", ...],
+              "items": [{"idempotency_key", "key", "title", "status", "reason?"}],
+              "synthesis_hints": [...]  // suggestions after bulk write
+            }
+        """
+        import json
+
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                result = mm.bulk_create_memory_items(
+                    items=items,
+                    dry_run=dry_run,
+                    allow_concepts=allow_concepts,
+                    root_name=root_name,
+                )
+                return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return f"Error in bulk_memory_create: {str(e)}"
 
     @mcp.tool()
     def memory_link_items(source_key: str, target_key: str) -> str:
@@ -1327,75 +1274,23 @@ def create_mcp_server() -> FastMCP:
             return f"Error generating period review: {str(e)}"
 
     @mcp.tool()
-    def memory_extract_from_text(
-        project: str,
-        text: str = "",
-        source_item_key: str | None = None,
-        source_uri: str | None = None,
-    ) -> str:
-        """Parse raw text (conversations, notes, papers) into structured MemoryItem candidates.
-
-        This tool performs a 'pre-extract' analysis of the text to identify key themes,
-        temporal anchors, and potential duplicates. It does NOT create the items;
-        the agent should review the results and then call memory_create_item.
-
-        Use this when a long conversation or a new paper contains multiple distinct
-        observations or results that should be remembered separately.
+    def memory_project_digest(collection_key: str, date_from: str | None = None) -> str:
+        """Fetch a full digest of all notes in a collection tree formatted as Markdown.
         
-        If 'text' is not provided and 'source_item_key' is provided, the tool will 
-        automatically fetch the full text of the Zotero paper/attachment.
-
+        This tool aggregates the full readable text of all notes (including subcollections)
+        into a single massive response. Use this to review a project's state in one shot,
+        e.g., to decide what new consolidated Memory Items to create via bulk_memory_create.
+        
         Args:
-            project: The target project slug
-            text: The raw text to analyze (optional if source_item_key is given)
-            source_item_key: Optional Zotero key of the source document
-            source_uri: Optional URL or link to the source
+            collection_key: The target collection key.
+            date_from: Optional ISO 8601 date, e.g., '2026-02-01T00:00:00Z', to limit range.
         """
         try:
             with get_client() as client:
-                fetch_status = ""
-                if not text and source_item_key:
-                    data = client.get_item_content(source_item_key)
-                    if data and "content" in data:
-                        text = data["content"]
-                        fetch_status = f"Fetched {len(text)} chars from attachment '{data.get('filename', 'Unknown')}'. "
-                
-                if not text:
-                    return "Error: You must provide either 'text' or a valid 'source_item_key' that contains readable content."
-
                 mm = MemoryManager(client)
-                
-                # Pre-analysis
-                meta = mm.extract_metadata_from_text(text)
-                
-                # Check for duplicates of the core theme (first 100 chars of text as proxy)
-                duplicates = mm.find_duplicates(text[:100], project)
-                
-                analysis = {
-                    "text_stats": meta,
-                    "potential_duplicates": [
-                        {"key": d["key"], "title": d["title"]} for d in duplicates
-                    ],
-                    "instruction": (
-                        f"{fetch_status}Review the text and the analysis above. "
-                        "Identify distinct facts, observations, or hypotheses. "
-                        "For each candidate, resolve coreferences (e.g., replace 'it' with specific nouns) "
-                        "and anchor relative dates to absolute ISO dates. "
-                        "Then, call memory_create_item for each validated memory."
-                    )
-                }
-                
-                if source_item_key:
-                    analysis["recommended_source_key"] = source_item_key
-                
-                # If text was auto-fetched, include a chunk of it in the response so the agent can see it
-                if fetch_status:
-                    # Give the agent the first 15000 chars as a preview to extract from
-                    analysis["fetched_text_preview"] = text[:15000] + ("\n...[TRUNCATED]" if len(text) > 15000 else "")
-                
-                return json.dumps(analysis, indent=2)
+                return mm.get_project_digest(collection_key=collection_key, date_from=date_from)
         except Exception as e:
-            return f"Error extracting from text: {str(e)}"
+            return f"Error generating project digest: {str(e)}"
 
     @mcp.tool()
     def memory_project_graph(project: str) -> str:
