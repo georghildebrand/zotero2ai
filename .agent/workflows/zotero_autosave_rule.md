@@ -14,5 +14,11 @@ You MUST call `memory_create_item` automatically (without waiting for the user t
 **How to auto-save:**
 Use the `memory_create_item` tool. Set `mem_class` to `unit` and `role` to `observation` or `result`. Set `project` to the current active project, and derive an appropriate domain tag (e.g., `mem:domain:physics` or `mem:domain:software-development`). Make sure the title is a short, descriptive label and the `content` is highly detailed yet atomic.
 
+**RELATIONSHIPS & LINKING**:
+Whenever you create a memory unit that refers to a detailed Zotero note (or vice versa), you MUST establish a bidirectional link:
+1. If creating a note with `create_or_extend_note`, include the memory item's key in the `related` parameter.
+2. OR use the `memory_link_items` tool to link the memory unit and the note.
+*This ensures the agent memory is searchable while the high-density documentation remains navigable.*
+
 > [!NOTE] 
 > Creating 'concept' and 'synthesis' memories DOES require user confirmation. However, basic 'unit' items under this autosave rule do NOT require permission.

@@ -224,16 +224,17 @@ class PluginClient:
         response = self._request("GET", "/items/search", params=params)
         return cast(list[dict[str, Any]], response.get("data", []))
 
-    def search_collections(self, query: str) -> list[dict[str, Any]]:
+    def search_collections(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
         """Search for collections by name (fuzzy).
 
         Args:
             query: Search query string
+            limit: Maximum number of results (default: 50)
 
         Returns:
             List of matching collections
         """
-        response = self._request("GET", "/collections/search", params={"q": query})
+        response = self._request("GET", "/collections/search", params={"q": query, "limit": limit})
         return cast(list[dict[str, Any]], response.get("data", []))
 
     def get_recent_items(self, limit: int = 5) -> list[dict[str, Any]]:

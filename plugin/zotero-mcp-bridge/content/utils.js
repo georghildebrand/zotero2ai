@@ -37,7 +37,7 @@ var MCPUtils = class {
 
         // Contains exact query
         if (textLower.includes(queryLower)) return 800;
-        if (pathLower.includes(queryLower)) return 700;
+        if (pathLower.includes(queryLower)) return 100; // Drastically lowered to avoid matching all sub-collections by default
 
         // Token-based matching
         const queryTokens = queryLower.split(/[\s\-_\/]+/).filter(t => t.length > 0);

@@ -48,9 +48,26 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     )
 
     # run command
-    subparsers.add_parser(
+    run_parser = subparsers.add_parser(
         "run",
         help="Start the MCP server",
+    )
+    run_parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="Transport protocol: 'stdio' (default, used by MCP hosts) or 'sse' (HTTP, for running the server yourself)",
+    )
+    run_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to (SSE only, default: 127.0.0.1)",
+    )
+    run_parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port to listen on (SSE only, default: 8765)",
     )
 
     return parser.parse_args(args)
@@ -125,8 +142,13 @@ def cmd_doctor() -> int:
         return 1
 
 
-def cmd_run() -> int:
+def cmd_run(transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> int:
     """Start the MCP server.
+
+    Args:
+        transport: 'stdio' (default) or 'sse' for HTTP-based SSE transport.
+        host: Hostname/IP to bind to when using SSE transport.
+        port: Port to listen on when using SSE transport.
 
     Returns:
         Exit code: 0 on success, 1 on failure.
@@ -141,10 +163,14 @@ def cmd_run() -> int:
 
         mcp = create_mcp_server()
 
-        logger.info("Starting MCP server...")
-
-        # Start the server with stdio transport for ChatGPT Desktop integration
-        mcp.run(transport="stdio")
+        if transport == "sse":
+            logger.info(f"Starting MCP server (SSE) on http://{host}:{port}/sse ...")
+            logger.info("Add to your MCP config:")
+            logger.info(f'  {{ "type": "sse", "url": "http://{host}:{port}/sse" }}')
+            mcp.run(transport="sse", host=host, port=port)
+        else:
+            logger.info("Starting MCP server (stdio)...")
+            mcp.run(transport="stdio")
 
         return 0
 
@@ -172,7 +198,11 @@ def main() -> int:
     if args.command == "doctor":
         return cmd_doctor()
     elif args.command == "run":
-        return cmd_run()
+        return cmd_run(
+            transport=getattr(args, "transport", "stdio"),
+            host=getattr(args, "host", "127.0.0.1"),
+            port=getattr(args, "port", 8765),
+        )
     else:
         # No command specified, show help
         parse_args(["--help"])

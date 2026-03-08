@@ -55,11 +55,16 @@ def create_mcp_server() -> FastMCP:
             return f"Error listing collections: {str(e)}"
 
     @mcp.tool()
-    def search_collections(query: str) -> str:
-        """Search for Zotero collections by name (fuzzy)."""
+    def search_collections(query: str, limit: int = 10) -> str:
+        """Search for Zotero collections by name (fuzzy).
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return (default: 10)
+        """
         try:
             with get_client() as client:
-                collections = client.search_collections(query)
+                collections = client.search_collections(query, limit=limit)
                 if not collections:
                     return f"No collections found matching '{query}'."
 
@@ -231,14 +236,10 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         """Create a new note or extend an existing one.
 
-        Args:
-            content: The HTML/text content to add.
-            note_key: If updating/extending, the key of the existing note.
-            parent_item_key: Key of the item to attach a NEW note to.
-            collection_key: Key of the collection for a NEW note.
-            extend: If True and note_key is provided, appends content to the existing note.
-            tags: Optional list of tags to add to the note.
-            related: Optional list of related item keys.
+        MANDATORY RELATIONSHIPS: Whenever you create a memory unit (memory_create_item) that
+        refers to this note, you MUST include the memory item's key in the 'related' parameter
+        to establish a bidirectional Zotero link. This ensures the agent memory is searchable
+        while documentation remains navigable.
         """
         try:
             with get_client() as client:
@@ -835,24 +836,14 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         """Create a new memory item.
 
+        MANDATORY RELATIONSHIPS: If this memory refers to a detailed Zotero note, you MUST
+        include the note's key in the 'related' parameter of create_or_extend_note, or use
+        memory_link_items to link them. This ensures the agent memory pack remains
+        navigable across high-density documentation.
+
         AUTOSAVE DIRECTIVE: You are ENCOURAGED to USE THIS TOOL PROACTIVELY to
         autosave high-utility facts, resolutions, and conclusions as 'unit' items
-        without asking the user for permission. If you solve a complex bug or the
-        user shares important context, record it immediately.
-
-        IMPORTANT: This tool requires USER CONFIRMATION for 'concept' and 'synthesis' types.
-        Ensure tags follow 'mem:domain:<value>' pattern and are in the registry.
-
-        Args:
-            mem_class: unit | concept | project | system
-            role: question | observation | hypothesis | result | synthesis
-            project: lowercase slug (e.g. 'lora-geometry')
-            title_label: Short descriptive label for the title
-            content: The actual memory content (text)
-            source: agent | user | paper | etc.
-            confidence: low | medium | high
-            tags: Optional domain tags, e.g., ['mem:domain:physics']
-            root_name: The root memory collection name
+        without asking the user for permission.
         """
         # Gating check (Policy enforcement)
         if mem_class in ["concept", "synthesis"] or role == "synthesis":
@@ -1272,6 +1263,12 @@ You MUST call `memory_create_item` automatically without waiting for user permis
 2. The user makes a definitive architectural, design, or project-planning decision.
 3. You reach the end of an experimental iteration (save the outcome/hypothesis).
 4. The user drops a major piece of lore, context, or credentials that will be needed later.
+
+**RELATIONSHIPS & LINKING**:
+Whenever you create a memory unit (MemoryItem) that refers to a detailed Zotero note (or vice versa), you MUST establish a bidirectional Zotero link:
+1. If creating a note with `create_or_extend_note`, include the memory item's key in the `related` parameter.
+2. OR use the `memory_link_items` tool to link the memory unit and the note.
+*This ensures the agent memory is searchable while the high-density documentation remains navigable.*
 
 **GUIDELINES**:
 - Keep memories ATOMIC. Extract distinct facts into separate MemoryItems.

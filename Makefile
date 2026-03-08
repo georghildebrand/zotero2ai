@@ -18,6 +18,18 @@ UV := uv
 PYTHON_SYSTEM ?= python3.12
 
 # =============================================================================
+# .ENV LOADING
+# =============================================================================
+
+# Automatically load .env if it exists (silently skip if missing)
+-include .env
+export
+
+# SSE server defaults (can be overridden in .env or on the command line)
+SSE_HOST ?= 127.0.0.1
+SSE_PORT ?= 8765
+
+# =============================================================================
 # HELP
 # =============================================================================
 
@@ -94,8 +106,13 @@ test-install: build ## Test wheel install in isolated virtualenv
 doctor:  ## Run diagnostics to check Zotero configuration
 > $(UV) run mcp-zotero2ai doctor
 
-run:  ## Run MCP server
+run:  ## Run MCP server (stdio, managed by MCP host — loads .env)
 > $(UV) run mcp-zotero2ai run
+
+serve-sse:  ## Run MCP server in SSE mode (self-hosted, loads .env) — use with zotero2ai-sse config
+> @echo "Starting MCP server in SSE mode on http://$(SSE_HOST):$(SSE_PORT)/sse"
+> @echo "  Set ZOTERO_MCP_TOKEN in .env before running."
+> $(UV) run mcp-zotero2ai run --transport sse --host $(SSE_HOST) --port $(SSE_PORT)
 
 run-help:  ## Show CLI help
 > $(UV) run mcp-zotero2ai --help
@@ -127,6 +144,5 @@ ci: check  ## Alias for CI systems
 all: check build ## Full pipeline (check + build)
 
 .PHONY: help setup install build clean distclean format format-check lint test test-cov \
-        test-install doctor run run-help validate check ci all \
-         test-install doctor run run-help validate check ci all \
+        test-install doctor run run-help serve-sse validate check ci all \
         install-system uninstall-system build-plugin

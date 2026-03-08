@@ -287,7 +287,7 @@ var RequestHandlers = class {
             const query = (request.query.q || "").trim();
             if (!query) return MCPUtils.formatError("Missing 'q' query parameter");
 
-            const minScore = parseInt(request.query.minScore || "200"); // Lowered from 300
+            const minScore = parseInt(request.query.minScore || "300"); // Raised from 200 to be more selective
             const limit = parseInt(request.query.limit || "50");
 
             // Search across all libraries
