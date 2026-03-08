@@ -842,12 +842,12 @@ var RequestHandlers = class {
 
             for (const lib of libraries) {
                 try {
-                    const tags = await Zotero.Tags.search("", lib.id);
+                    // Zotero.Tags.getAll() is more reliable for listing everything
+                    const tags = Zotero.Tags.getAll(lib.id);
                     if (tags && Array.isArray(tags)) {
                         for (const t of tags) {
-                            // Format tags to be simple strings for serialization
-                            const tagName = (typeof t === 'string') ? t : (t.tag || t.name || (typeof t.getName === 'function' ? t.getName() : String(t)));
-                            allTags.add(tagName);
+                            const tagName = (typeof t === 'string') ? t : (t.tag || t.name);
+                            if (tagName) allTags.add(tagName);
                         }
                     }
                 } catch (e) {
