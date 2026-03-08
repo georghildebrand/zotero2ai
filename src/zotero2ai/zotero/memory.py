@@ -4,6 +4,7 @@ import logging
 from typing import Any, cast
 
 import yaml  # type: ignore[import-untyped]
+from datetime import datetime, timedelta
 
 from zotero2ai.zotero.models import MemoryItem
 from zotero2ai.zotero.plugin_client import PluginClient
@@ -739,3 +740,101 @@ class MemoryManager:
             logger.warning(f"Error checking synthesis needs: {e}")
             
         return None
+
+    def get_period_review(
+        self,
+        period: str = "week",
+        detail_level: int = 1,
+        project_slug: str | None = None,
+        root_name: str = "Agent Memory"
+    ) -> dict[str, Any]:
+        """Aggregate activity and perform gap analysis for a specific time period."""
+        now = datetime.utcnow()
+        if period == "day":
+            start_date = now - timedelta(days=1)
+        elif period == "week":
+            start_date = now - timedelta(days=7)
+        elif period == "month":
+            start_date = now - timedelta(days=30)
+        else:
+            # Try to parse YYYY-MM
+            try:
+                start_date = datetime.strptime(period, "%Y-%m")
+            except ValueError:
+                start_date = now - timedelta(days=7)
+
+        date_from = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        # 1. Fetch Agent Memory Activity
+        memory_items = self.recall(
+            project_slug=project_slug,
+            date_from=date_from,
+            state="",  # All states
+            limit=200,
+            root_name=root_name
+        )
+        
+        # 2. Fetch Global Zotero Activity (Recently added/modified papers and notes)
+        global_items = self.client.search_items(
+            date_from=date_from,
+            limit=100,
+            sort_by="dateModified"
+        )
+        
+        # Filter global items: exclude those already in Agent Memory as reports
+        mem_keys = {item["key"] for item in memory_items}
+        other_items = [i for i in global_items if i["key"] not in mem_keys and i.get("itemType") != "report"]
+
+        # 3. Categorize Memory Items
+        synthesis = [i for i in memory_items if i.get("role") == "synthesis" or i.get("mem_class") == "concept"]
+        units = [i for i in memory_items if i.get("mem_class") == "unit"]
+        
+        # 4. Group Global Items by Type and Collection
+        notes = [i for i in global_items if (i.get("itemType") == "note" or not i.get("title")) and i["key"] not in mem_keys]
+        # Ensure notes from search have a title for display
+        for n in notes:
+            if not n.get("title") and n.get("key"):
+                # We'll rely on the agent to fetch the note content if needed, 
+                # but let's try to provide a generic title
+                n["title"] = f"Note ({n['key']})"
+
+        papers = [i for i in other_items if i.get("itemType") not in ("note", "attachment") and i.get("title")]
+        
+        # Basic Gap Analysis
+        gaps = []
+        # - Search for items with no related memory units? (Simplified: check for papers in project collections)
+        if project_slug:
+            cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
+            proj_key = cols.get("project")
+            proj_papers = [p for p in papers if proj_key in p.get("collections", [])]
+            for p in proj_papers:
+                # Check if any memory unit refers to this paper
+                ref_found = any(p["key"] in (i.get("related") or []) for i in memory_items)
+                if not ref_found:
+                    gaps.append(f"Dangling Paper: '{p['title']}' was added to {project_slug} but has no observations.")
+        
+        # - Synthesis recommendations
+        if project_slug:
+            rec = self.check_synthesis_needed(project_slug)
+            if rec:
+                gaps.append(rec)
+
+        return {
+            "period": period,
+            "date_range": [date_from, now.strftime("%Y-%m-%dT%H:%M:%SZ")],
+            "summary": {
+                "synthesis_count": len(synthesis),
+                "unit_count": len(units),
+                "new_papers": len(papers),
+                "new_notes": len(notes)
+            },
+            "memory": {
+                "synthesis": synthesis if detail_level >= 1 else synthesis[:5],
+                "units": units if detail_level >= 2 else []
+            },
+            "global": {
+                "new_papers": papers[:10],
+                "new_notes": notes[:10]
+            },
+            "gaps": gaps
+        }

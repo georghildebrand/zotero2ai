@@ -1254,6 +1254,82 @@ def create_mcp_server() -> FastMCP:
             return f"Error fetching consolidation candidates: {str(e)}"
 
     @mcp.tool()
+    def memory_get_period_review(
+        period: str = "week",
+        detail_level: int = 1,
+        project: str | None = None,
+        root_name: str = "Agent Memory"
+    ) -> str:
+        """Generate a structured summary of activity and gaps for a given period.
+        
+        This tool reviews both the Agent Memory structure and the global Zotero library
+        to identify what was worked on, what was synthesized, and where notes or 
+        memory units might be missing.
+
+        Args:
+            period: "day", "week", "month", or "YYYY-MM" (default: "week")
+            detail_level: 1 for high-level overview, 2 for detail (including all units)
+            project: Optional project slug to focus on.
+            root_name: Root collection name
+        """
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                review = mm.get_period_review(
+                    period=period,
+                    detail_level=detail_level,
+                    project_slug=project,
+                    root_name=root_name
+                )
+                
+                # Format the review into a nice markdown report
+                lines = [f"# 📅 Period Review: {period.capitalize()} ({review['date_range'][0]} to {review['date_range'][1]})"]
+                
+                s = review["summary"]
+                lines.append(f"\n### 📊 Activity Summary")
+                lines.append(f"- **Syntheses/Concepts**: {s['synthesis_count']}")
+                lines.append(f"- **Memory Units**: {s['unit_count']}")
+                lines.append(f"- **Global Papers Added**: {s['new_papers']}")
+                lines.append(f"- **Meeting/Other Notes**: {s['new_notes']}")
+                
+                if review["memory"]["synthesis"]:
+                    lines.append(f"\n### 🧠 Memory Evolution")
+                    for item in review["memory"]["synthesis"]:
+                        lines.append(f"- **{item['title']}** ({item['key']})")
+                        if item.get("content_preview"):
+                            lines.append(f"  > {item['content_preview']}...")
+                
+                if review["memory"]["units"] and detail_level >= 2:
+                    lines.append(f"\n### 📝 Detailed Observations")
+                    for item in review["memory"]["units"]:
+                        lines.append(f"- {item['title']} ({item['key']})")
+
+                if review["global"]["new_papers"]:
+                    lines.append(f"\n### 📚 Global Library Activity")
+                    for item in review["global"]["new_papers"]:
+                        creators = ", ".join(item.get("creators", []))
+                        lines.append(f"- **{item.get('title', 'Untitled')}** (Key: {item['key']})")
+                        if creators:
+                            lines.append(f"  Creators: {creators}")
+
+                if review["global"]["new_notes"]:
+                    lines.append(f"\n### 🗒️ New Meeting/Other Notes")
+                    for item in review["global"]["new_notes"]:
+                        lines.append(f"- {item.get('title', 'Untitled')} ({item['key']})")
+
+                if review["gaps"]:
+                    lines.append(f"\n### 🔍 Gap Analysis & Recommendations")
+                    for gap in review["gaps"]:
+                        lines.append(f"- {gap}")
+                else:
+                    lines.append(f"\n### ✅ Checklist")
+                    lines.append("- No immediate gaps detected. Your memory is well-structured!")
+                
+                return "\n".join(lines)
+        except Exception as e:
+            return f"Error generating period review: {str(e)}"
+
+    @mcp.tool()
     def memory_extract_from_text(
         project: str,
         text: str = "",

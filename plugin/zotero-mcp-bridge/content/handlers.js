@@ -382,7 +382,10 @@ var RequestHandlers = class {
             const dateTo = request.query.dateTo || "";
             const sortBy = request.query.sortBy || "";  // "dateAdded" for chronological
 
-            if (!searchQuery && !tag && !collectionKey) return MCPUtils.formatError("Missing 'q', 'tag', or 'collectionKey' query parameter");
+            // Allow searching if ANY criteria is provided (including date range)
+            if (!searchQuery && !tag && !collectionKey && !dateFrom && !dateTo) {
+                return MCPUtils.formatError("Missing search criteria ('q', 'tag', 'collectionKey', or 'dateFrom')");
+            }
 
             const libraries = libraryIDParam ? [{ id: parseInt(libraryIDParam) }] : Zotero.Libraries.getAll();
             let allItemIDs = [];
@@ -407,16 +410,18 @@ var RequestHandlers = class {
                     s.addCondition('collection', 'is', collectionKey);
                 }
 
-                // Date range filtering
+                // Date range filtering (defaults to dateAdded if no sortBy specified, 
+                // but if sortBy is dateModified, use that for filtering too)
+                const dateField = (sortBy === 'dateModified') ? 'dateModified' : 'dateAdded';
                 if (dateFrom) {
-                    s.addCondition('dateAdded', 'isAfter', dateFrom);
+                    s.addCondition(dateField, 'isAfter', dateFrom);
                 }
                 if (dateTo) {
-                    s.addCondition('dateAdded', 'isBefore', dateTo);
+                    s.addCondition(dateField, 'isBefore', dateTo);
                 }
 
                 s.addCondition('itemType', 'isNot', 'attachment');
-                s.addCondition('itemType', 'isNot', 'note');
+                // s.addCondition('itemType', 'isNot', 'note'); // We WANT notes in the review/timeline
 
                 const itemIDs = await s.search();
                 allItemIDs = allItemIDs.concat(itemIDs);
@@ -424,9 +429,13 @@ var RequestHandlers = class {
             }
 
             // If sortBy is requested, load items for sorting before limiting
-            if (sortBy === 'dateAdded' && allItemIDs.length > 0) {
+            if ((sortBy === 'dateAdded' || sortBy === 'dateModified') && allItemIDs.length > 0) {
                 const items = await Zotero.Items.getAsync(allItemIDs);
-                items.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
+                items.sort((a, b) => {
+                    const dateA = new Date(a[sortBy]);
+                    const dateB = new Date(b[sortBy]);
+                    return dateB - dateA; // Newest first
+                });
                 const limitedItems = items.slice(0, limit);
                 return await this.formatItems(limitedItems);
             }
