@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "pyyaml>=6.0.3",
+    "watchdog>=5.0.0",
 ]
 readme = "README.md"
 requires-python = ">=3.12"

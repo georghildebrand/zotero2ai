@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: zotero-open-webui
+    # If running on Synology via Synology Container Manager, you can map these paths
+    volumes:
+      - ./data:/app/backend/data
+      # MOUNT THE SYNC FOLDER SO THE TOOLS CAN WRITE JOBS TO IT
+      # E.g. point this to your mapped Syncthing / Synology Drive folder on the NAS filesystem
+      - /volume1/homes/georg.hildebrand/Syncthing/Zotero_Queue:/app/backend/data/zotero_queue_sync
+      # MOUNT THE READ CACHE SYNC FOLDER FOR BETTER BIBTEX JSON EXPORTS
+      - /volume1/homes/georg.hildebrand/Syncthing/Zotero_Read_Cache:/app/backend/data/zotero_read_cache
+    ports:
+      - "3000:8080"
+    environment:
+      - "OLLAMA_BASE_URL=http://host.docker.internal:11434"
+      - "WEBUI_SECRET_KEY=zotero-auth-key"
+    restart: always

@@ -57,7 +57,17 @@ export ZOTERO_MCP_TOKEN="your_generated_token_here"
 
 # OPTIONAL: Path to Zotero data directory (for legacy diagnostics)
 export ZOTERO_DATA_DIR="/Users/yourname/Zotero"
+
+# OPTIONAL: Path to a Syncthing/Synology Drive folder to enable offline mobile queueing
+# e.g. export ZOTERO2AI_QUEUE_WATCH_DIR="/Users/yourname/Syncthing/Zotero_Queue"
 ```
+
+### Mobile / Offline Support (NAS & Syncthing)
+
+`zotero2ai` includes a queueing architecture designed for use with self-hosted instances of Open WebUI on a NAS (e.g., Synology):
+- Provides LLM agents on your mobile phone the ability to save Zotero memory items completely offline, **without relying on Zotero Cloud**.
+- **Setup:** See `deploy/nas/docker-compose.yml` for deploying the agent frontend. The agent writes jobs to a synced folder (via Syncthing).
+- **Execution:** Setting the `ZOTERO2AI_QUEUE_WATCH_DIR` environment variable automatically starts an atomic queue-processor alongside the standard MCP server. It monitors the synced folder and commits offline updates the moment your laptop comes online.
 
 ### Available Tools
 

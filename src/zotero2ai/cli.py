@@ -166,7 +166,16 @@ def cmd_run(transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765)
 
     try:
         # Import and create the real MCP server
+        import os
         from zotero2ai.mcp_server.server import create_mcp_server
+        
+        watch_dir = os.environ.get("ZOTERO2AI_QUEUE_WATCH_DIR")
+        if watch_dir:
+            from zotero2ai.queue.worker import start_queue_worker_in_background
+            logger.info(f"Starting async queue worker thread on {watch_dir}...")
+            # Assigning to a variable prevents the observer from being garbage collected
+            # if we wanted to gracefully shutdown, but for daemon thread it's okay.
+            _queue_observer = start_queue_worker_in_background(watch_dir)
 
         mcp = create_mcp_server()
 
