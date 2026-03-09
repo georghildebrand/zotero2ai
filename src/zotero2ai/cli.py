@@ -102,14 +102,21 @@ def cmd_doctor() -> int:
         # Test read-only database connection
         logger.info("Testing database connection...")
         db_uri = f"file:{db_path}?mode=ro"
-        conn = sqlite3.connect(db_uri, uri=True)
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM items")
-            item_count = cursor.fetchone()[0]
-            logger.info(f"✓ Database connection successful: {item_count} items found")
-        finally:
-            conn.close()
+            conn = sqlite3.connect(db_uri, uri=True, timeout=2.0)
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM items")
+                item_count = cursor.fetchone()[0]
+                logger.info(f"✓ Database connection successful: {item_count} items found")
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as e:
+            # Zotero can keep the DB busy/locked while running; this should not prevent plugin connectivity checks.
+            if "database is locked" in str(e).lower():
+                logger.warning("⚠️  Database is locked (Zotero may be actively writing). Skipping DB query and continuing.")
+            else:
+                raise
 
         # Check Plugin Connection (New Requirement)
         logger.info("Checking Zotero Bridge Plugin connection...")
