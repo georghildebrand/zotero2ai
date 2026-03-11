@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-11
+
 ### Added
 - **Mobile Sync (Mobile Bridge)**: A complete offline-first synchronization architecture for mobile LLM agents.
   - Background worker that processes jobs from a synced folder (Syncthing/Synology Drive).
@@ -20,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for AI to directly access files found in Zotero library.
 - Added URL support: Tools now return URLs for webpage items and link attachments in addition to file paths.
 - New endpoint `/collections/{key}/items` in the plugin to retrieve all items in a collection.
+- **JIT Workflow Discovery**: New `memory_list_workflows` and `memory_get_workflow_instructions` tools expose `.agent/workflows/*.md` SOPs to agents via the MCP protocol (no filesystem access required).
+- **`memory_archive_item` tool**: New tool to transition memory items to `mem:state:archived` state for historical retention without active recall.
+- **`general.md` SOP**: New baseline workflow covering memory hygiene rules, deduplication, and tool preferences for any connected agent.
+- **MCP Inspector**: Added documentation for manual testing via `npx @modelcontextprotocol/inspector uv run mcp-zotero2ai run` to `README.md`.
+- **Implementation References**: All `.agent/workflows/*.md` files now include a codebase reference section linking SOPs to their implementing Python modules.
+- **MCP Server Modularization**: Extracted `server.py` tool registrations into separate modules (`tools/collections.py`, `tools/items.py`, `tools/memory.py`, `tools/prompts.py`, `tools/workflows.py`).
 
 ## [0.2.0] - 2026-03-08
 
