@@ -171,6 +171,7 @@ class MemoryManager:
             tags=tags,
             collections=[collection_key],
             note=note_html,
+            fields={"abstractNote": item.summary} if item.summary else None,
         )
 
     def search_memory(
@@ -1243,7 +1244,28 @@ class MemoryManager:
         """Fetch a summary of all active memory items (concepts and units) for a project.
         
         Returns a formatted Markdown document for the agent to quickly ingest state.
+        Now includes 'guideline' and 'sop' items for default context.
         """
+        # Fetch active guidelines/SOPs (default context)
+        guidelines = self.recall(
+            project_slug=project_slug,
+            state="active",
+            tags=["mem:role:guideline"],
+            limit=10,
+            root_name=root_name,
+            include_full_content=True
+        )
+        
+        # Also check for global guidelines (generic system context)
+        global_guidelines = self.recall(
+            project_slug=None, # Cross-project search
+            state="active",
+            tags=["mem:class:system", "mem:role:guideline"],
+            limit=5,
+            root_name=root_name,
+            include_full_content=True
+        )
+
         # Fetch active concepts (high level)
         concepts = self.recall(
             project_slug=project_slug, 
@@ -1264,11 +1286,20 @@ class MemoryManager:
             include_full_content=False # Just previews for units to keep it concise
         )
         
-        if not concepts and not units:
+        if not concepts and not units and not guidelines:
             return f"# Project Context: {project_slug}\n\nNo active memory items found. Start by observing or creating memories."
             
         lines = [f"# Project Context: {project_slug}", f"**Generated:** {datetime.now().isoformat()}", "\n---\n"]
         
+        if global_guidelines or guidelines:
+            lines.append("## 📜 Guidelines & Standard Operating Procedures")
+            all_guidelines = (global_guidelines or []) + (guidelines or [])
+            for g in all_guidelines:
+                lines.append(f"### {g['title']} (Key: {g['key']})")
+                lines.append(f"\n{g.get('content', g.get('content_preview', ''))}")
+                lines.append("\n")
+            lines.append("\n---\n")
+
         if concepts:
             lines.append("## 🧠 High-Level Concepts & Strategic State")
             for c in concepts:
@@ -1281,6 +1312,9 @@ class MemoryManager:
         if units:
             lines.append("## 📝 Active Observations & Findings")
             for u in units:
+                # Skip guideline items if they were already listed
+                if "guideline" in u.get('tags', []):
+                    continue
                 role_label = u.get('role', 'unit').capitalize()
                 lines.append(f"- **{u['title']}** (Key: {u['key']}) [{role_label}]")
                 if u.get('content_preview'):

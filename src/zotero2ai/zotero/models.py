@@ -71,6 +71,7 @@ class MemoryItem:
     project: str  # lowercase slug
     title: str  # [MEM][<class>][<project>] <short label>
     content: str  # human-readable text below metadata
+    summary: str = ""  # TL;DR stored in Zotero abstract field
     state: str = "active"  # active | superseded | archived
     version: int = 1
     source: str = "agent"  # user | agent | paper | conversation | manual
@@ -219,6 +220,7 @@ class MemoryItem:
             project=project or "unknown",
             title=title,
             content=content_text or title,
+            summary=item_data.get("abstractNote") or item_data.get("abstract") or "",
             state=state,
             version=metadata.get("version", 1),
             source=metadata.get("source", "unknown"),

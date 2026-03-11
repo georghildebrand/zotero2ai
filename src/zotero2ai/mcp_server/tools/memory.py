@@ -62,14 +62,25 @@ def register_memory_tools(mcp: FastMCP):
             return f"Error getting registry: {str(e)}"
 
     @mcp.tool()
-    def memory_create_item(mem_class: str, role: str, project: str, title_label: str, content: str, source: str = "agent", confidence: str = "medium", tags: list[str] | None = None, root_name: str = "Agent Memory") -> str:
+    def memory_create_item(mem_class: str, role: str, project: str, title_label: str, content: str, source: str = "agent", confidence: str = "medium", tags: list[str] | None = None, summary: str = "", root_name: str = "Agent Memory") -> str:
         """Create a new memory item."""
         try:
             with get_client() as client:
                 mm = MemoryManager(client)
                 cols = mm.ensure_collections(root_name=root_name, project_slug=project)
                 mem_id = MemoryItem.generate_mem_id(project)
-                m_item = MemoryItem(mem_id=mem_id, mem_class=mem_class, role=role, project=project, title=f"[MEM][{mem_class}][{project}] {title_label}", content=content, source=source, confidence=confidence, tags=tags or [])
+                m_item = MemoryItem(
+                    mem_id=mem_id, 
+                    mem_class=mem_class, 
+                    role=role, 
+                    project=project, 
+                    title=f"[MEM][{mem_class}][{project}] {title_label}", 
+                    content=content, 
+                    summary=summary,
+                    source=source, 
+                    confidence=confidence, 
+                    tags=tags or []
+                )
                 resp = mm.create_memory_item(m_item, cols["project"])
                 return f"Successfully created: {m_item.title} (Key: {resp.get('key')})"
         except Exception as e:
