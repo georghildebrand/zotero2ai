@@ -106,6 +106,16 @@ uv run zotero2ai doctor
 make doctor
 ```
 
+### Manual Testing (MCP Inspector)
+
+To interactively test all tools and prompts in a browser-based UI, use the official MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector uv run mcp-zotero2ai run
+```
+
+This will start an interactive session at `http://localhost:3000` where you can manually trigger tools like `memory_list_workflows` or `search_papers`.
+
 ### Run MCP Server
 
 Start the MCP server (with optional mobile sync worker):
