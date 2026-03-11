@@ -221,7 +221,7 @@ To create these issues on GitHub:
 
 ```bash
 # Navigate to repository
-cd /Users/georg.hildebrand/workspace/github.com/zotero2ai
+cd [PATH_TO_REPO]
 
 # Create issues using GitHub CLI (if installed)
 gh issue create --title "Add list_collection_children tool" \

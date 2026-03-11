@@ -10,7 +10,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-class QueueJob(BaseModel):
+class MobileSyncJob(BaseModel):
     id: str = Field(default_factory=lambda: f"job_{uuid.uuid4().hex[:8]}")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     action: str

@@ -114,6 +114,9 @@ serve-sse:  ## Run MCP server in SSE mode (self-hosted, loads .env) — use with
 > @echo "  Set ZOTERO_MCP_TOKEN in .env before running."
 > $(UV) run mcp-zotero2ai run --transport sse --host $(SSE_HOST) --port $(SSE_PORT)
 
+sync-worker:  ## Start the standalone mobile sync worker (loads .env)
+> $(UV) run mcp-zotero2ai sync-worker
+
 run-help:  ## Show CLI help
 > $(UV) run mcp-zotero2ai --help
 

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Mobile Sync (Mobile Bridge)**: A complete offline-first synchronization architecture for mobile LLM agents.
+  - Background worker that processes jobs from a synced folder (Syncthing/Synology Drive).
+  - Automated **Zotero Read Cache**: Periodically exports recent items for mobile search tools.
+  - Native integration into the `run` command via `--mobile-sync-dir`.
+  - Standalone `sync-worker` command for dedicated sync machines.
+- **Open WebUI Integration**: Added Docker Compose configurations and custom Python tools for mobile search and memory creation.
 - Attachment file paths in `search_papers` and `get_recent_papers` responses.
 - New `get_item_attachments` tool to retrieve all attachments and file paths for a specific item.
 - New `get_collection_attachments` tool for **batch processing** - retrieve all attachments and file paths for all items in a collection (supports up to 500 items).

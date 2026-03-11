@@ -32,7 +32,7 @@
 2. **Install the updated plugin**:
    - Go to `Tools` → `Add-ons`
    - Click the gear icon → `Install Add-on From File...`
-   - Select: `/Users/georg.hildebrand/workspace/github.com/zotero2ai/plugin/zotero-mcp-bridge.xpi`
+   - Select: [PATH_TO_REPO]/plugin/zotero-mcp-bridge.xpi
 3. **Restart Zotero**.
 
 ## Verification Scenarios

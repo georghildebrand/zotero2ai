@@ -15,6 +15,7 @@ Note: This is a work in progress and is not yet ready for production use. Also i
 -   **No Database Locks**: Avoids SQLite concurrency issues by using the Zotero internal API.
 -   **Friendly Name Discovery**: Automatically generates human-readable titles for notes.
 -   **Security First**: Uses 256-bit Bearer tokens and binds exclusively to the loopback interface (`127.0.0.1`).
+-   **Mobile Sync (Mobile Bridge)**: Cloud-free synchronization for mobile agents. Allows mobile LLMs to save memories and search your library offline using a NAS-based worker.
 -   **Agent Memory Pack**: A complete Zotero-native lifelong memory system for LLM agents. Features structured storage, semantic PDF extraction, automated topic consolidation, and Mermaid.js knowledge graphing.
 
 ### SimpleMem Attribution
@@ -58,16 +59,17 @@ export ZOTERO_MCP_TOKEN="your_generated_token_here"
 # OPTIONAL: Path to Zotero data directory (for legacy diagnostics)
 export ZOTERO_DATA_DIR="/Users/yourname/Zotero"
 
-# OPTIONAL: Path to a Syncthing/Synology Drive folder to enable offline mobile queueing
-# e.g. export ZOTERO2AI_QUEUE_WATCH_DIR="/Users/yourname/Syncthing/Zotero_Queue"
+# OPTIONAL: Path to a Syncthing/Synology Drive folder to enable offline mobile sync
+# e.g. export ZOTERO2AI_MOBILE_SYNC_WATCH_DIR="/Users/yourname/Syncthing/Zotero_Mobile_Sync"
 ```
 
 ### Mobile / Offline Support (NAS & Syncthing)
 
-`zotero2ai` includes a queueing architecture designed for use with self-hosted instances of Open WebUI on a NAS (e.g., Synology):
+`zotero2ai` includes a mobile synchronization architecture designed for use with self-hosted instances of Open WebUI on a NAS (e.g., Synology):
 - Provides LLM agents on your mobile phone the ability to save Zotero memory items completely offline, **without relying on Zotero Cloud**.
-- **Setup:** See `deploy/nas/docker-compose.yml` for deploying the agent frontend. The agent writes jobs to a synced folder (via Syncthing).
-- **Execution:** Setting the `ZOTERO2AI_QUEUE_WATCH_DIR` environment variable automatically starts an atomic queue-processor alongside the standard MCP server. It monitors the synced folder and commits offline updates the moment your laptop comes online.
+- **Setup:** See `deploy/mobile_sync/docker-compose.yml` for deploying the agent frontend. The agent writes jobs to a synced folder (via Syncthing or Synology Drive).
+- **Execution:** Setting the `ZOTERO2AI_MOBILE_SYNC_WATCH_DIR` environment variable (or using the `--mobile-sync-dir` flag) automatically starts the mobile sync processor alongside the standard MCP server. It monitors the synced folder and commits offline updates the moment your laptop comes online.
+- **Automated Read Cache:** The worker automatically exports your recent Zotero items to a `ZoteroReadCache` subfolder within your watch directory, allowing your mobile LLM to search your library even while your laptop is offline.
 
 ### Available Tools
 
@@ -99,15 +101,33 @@ The Agent Memory Pack gives LLMs persistent, lifelong memory structured directly
 Check if your Zotero setup and plugin connection are working:
 
 ```bash
+uv run zotero2ai doctor
+# OR
 make doctor
 ```
 
 ### Run MCP Server
 
-Start the MCP server:
+Start the MCP server (with optional mobile sync worker):
 
 ```bash
+# Using environment variable
+export ZOTERO2AI_MOBILE_SYNC_WATCH_DIR="~/ZoteroQueue"
+uv run zotero2ai run
+
+# OR using command line flag
+uv run zotero2ai run --mobile-sync-dir ~/ZoteroQueue
+
+# OR using make (if env var is in .env)
 make run
+```
+
+### Run Standalone Sync Worker (Optional)
+
+If you only want to run the worker (e.g. on a background machine) without the MCP server interface:
+
+```bash
+uv run zotero2ai sync-worker --watch-dir ~/ZoteroQueue
 ```
 
 ### ChatGPT Desktop Integration

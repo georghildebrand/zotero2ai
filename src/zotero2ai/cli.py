@@ -69,6 +69,22 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=8765,
         help="Port to listen on (SSE only, default: 8765)",
     )
+    run_parser.add_argument(
+        "--mobile-sync-dir",
+        default=None,
+        help="Optional: Directory to watch for mobile sync jobs (if set, starts worker in background)",
+    )
+
+    # sync-worker command
+    sync_parser = subparsers.add_parser(
+        "sync-worker",
+        help="Start the mobile sync worker standalone",
+    )
+    sync_parser.add_argument(
+        "--watch-dir",
+        default=None,
+        help="Directory to watch for sync jobs (reads ZOTERO2AI_MOBILE_SYNC_WATCH_DIR if not provided)",
+    )
 
     return parser.parse_args(args)
 
@@ -149,13 +165,19 @@ def cmd_doctor() -> int:
         return 1
 
 
-def cmd_run(transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> int:
+def cmd_run(
+    transport: str = "stdio",
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    mobile_sync_dir: str | None = None,
+) -> int:
     """Start the MCP server.
 
     Args:
         transport: 'stdio' (default) or 'sse' for HTTP-based SSE transport.
         host: Hostname/IP to bind to when using SSE transport.
         port: Port to listen on when using SSE transport.
+        mobile_sync_dir: Optional directory to watch for mobile sync jobs.
 
     Returns:
         Exit code: 0 on success, 1 on failure.
@@ -169,13 +191,13 @@ def cmd_run(transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765)
         import os
         from zotero2ai.mcp_server.server import create_mcp_server
         
-        watch_dir = os.environ.get("ZOTERO2AI_QUEUE_WATCH_DIR")
+        watch_dir = mobile_sync_dir or os.environ.get("ZOTERO2AI_MOBILE_SYNC_WATCH_DIR")
         if watch_dir:
-            from zotero2ai.queue.worker import start_queue_worker_in_background
-            logger.info(f"Starting async queue worker thread on {watch_dir}...")
+            from zotero2ai.mobile_sync.worker import start_mobile_sync_worker
+            logger.info(f"Starting async mobile sync worker thread on {watch_dir}...")
             # Assigning to a variable prevents the observer from being garbage collected
             # if we wanted to gracefully shutdown, but for daemon thread it's okay.
-            _queue_observer = start_queue_worker_in_background(watch_dir)
+            _sync_observer = start_mobile_sync_worker(watch_dir)
 
         mcp = create_mcp_server()
 
@@ -218,7 +240,34 @@ def main() -> int:
             transport=getattr(args, "transport", "stdio"),
             host=getattr(args, "host", "127.0.0.1"),
             port=getattr(args, "port", 8765),
+            mobile_sync_dir=getattr(args, "mobile_sync_dir", None),
         )
+    elif args.command == "sync-worker":
+        import os
+        import time
+        import logging
+        from zotero2ai.mobile_sync.worker import start_mobile_sync_worker
+        
+        logger = logging.getLogger("zotero2ai.cli")
+        watch_dir = args.watch_dir or os.environ.get("ZOTERO2AI_MOBILE_SYNC_WATCH_DIR")
+        
+        if not watch_dir:
+            logger.error("✗ No watch directory specified. Use --watch-dir or set ZOTERO2AI_MOBILE_SYNC_WATCH_DIR.")
+            return 1
+            
+        logger.info(f"Starting standalone mobile sync worker on {watch_dir}...")
+        observer = start_mobile_sync_worker(watch_dir)
+        if not observer:
+            return 1
+            
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Stopping worker...")
+            observer.stop()
+        observer.join()
+        return 0
     else:
         # No command specified, show help
         parse_args(["--help"])

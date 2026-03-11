@@ -1,19 +1,19 @@
 {
     "mcpServers": {
         "zotero2ai": {
-            "command": "/Users/georg.hildebrand/.local/bin/uv",
+            "command": "uv",
             "args": [
                 "--directory",
-                "/Users/georg.hildebrand/workspace/github.com/zotero2ai",
+                "[PATH_TO_REPO]",
                 "run",
                 "mcp-zotero2ai",
                 "run"
             ],
             "env": {
-                "ZOTERO_DATA_DIR": "/Users/georg.hildebrand/zotero",
+                "ZOTERO_DATA_DIR": "[PATH_TO_ZOTERO_DATA]",
                 "ZOTERO_BRIDGE_PORT": "23120",
-                "ZOTERO_MCP_TOKEN": "<YOUR_TOKEN>",
-                "PATH": "/Users/georg.hildebrand/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+                "ZOTERO_MCP_TOKEN": "[YOUR_TOKEN]",
+                "PATH": "[PATH_TO_UV_BIN]:$PATH"
             }
         }
     }

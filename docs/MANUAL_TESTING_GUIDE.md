@@ -264,7 +264,7 @@ echo $ZOTERO_DATA_DIR
 ### 3.2 Test MCP Server Startup
 
 ```bash
-cd /Users/georg.hildebrand/workspace/github.com/zotero2ai
+cd [PATH_TO_REPO]
 uv run zotero2ai
 ```
 

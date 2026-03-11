@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 mcp-zotero2ai = "zotero2ai.cli:main"
+zotero2ai = "zotero2ai.cli:main"
 
 [build-system]
 requires = ["hatchling"]

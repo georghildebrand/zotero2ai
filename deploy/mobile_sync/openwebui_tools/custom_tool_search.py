@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 # Important: This path must match the volume mapping for the read cache in docker-compose.yml
-# e.g. - /volume1/homes/georg.hildebrand/Syncthing/Zotero_Read_Cache:/app/backend/data/zotero_read_cache
 READ_CACHE_DIR = Path("/app/backend/data/zotero_read_cache")
 
 class Tools:

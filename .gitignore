@@ -134,6 +134,9 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# testdata
+deploy/data/*
+
 # Environments
 .env
 .envrc
@@ -196,13 +199,13 @@ cython_debug/
 .pypirc
 
 # Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
 
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+# Zotero2AI Specific
+deploy/mobile_sync/data/
+deploy/mobile_sync/.env
+configs/antigravity_mcp.json
+*.xpi
+ZoteroQueue/
+zotero_read_cache/

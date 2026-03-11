@@ -7,7 +7,7 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from zotero2ai.queue.schema import QueueJob, JobStatus
+from zotero2ai.mobile_sync.schema import MobileSyncJob, JobStatus
 from zotero2ai.config import resolve_zotero_mcp_token
 
 # Only importing for type checking if needed, otherwise we will pass the server object
@@ -16,7 +16,7 @@ from zotero2ai.zotero.plugin_client import PluginClient
 
 logger = logging.getLogger(__name__)
 
-class QueueJobHandler(FileSystemEventHandler):
+class MobileSyncJobHandler(FileSystemEventHandler):
     def __init__(self, watch_dir: Path):
         self.watch_dir = watch_dir
         self.pending_dir = watch_dir / "pending"
@@ -24,8 +24,11 @@ class QueueJobHandler(FileSystemEventHandler):
         self.failed_dir = watch_dir / "failed"
         
         # Ensure directories exist
-        for d in [self.pending_dir, self.completed_dir, self.failed_dir]:
+        for d in [self.pending_dir, self.completed_dir, self.failed_dir, watch_dir / "ZoteroReadCache"]:
             d.mkdir(parents=True, exist_ok=True)
+            
+        self.last_export_time = 0
+        self.export_interval = 300 # Export every 5 minutes if there are changes
             
     def process_existing_files(self):
         """Process files that are already in the pending directory before monitoring started."""
@@ -60,13 +63,13 @@ class QueueJobHandler(FileSystemEventHandler):
             with open(processing_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
-            job = QueueJob(**data)
+            job = MobileSyncJob(**data)
             
             # Skip if not pending (safety check)
             if job.status != JobStatus.PENDING:
                 return
 
-            logger.info(f"Processing zotero queue job {job.id}: {job.action}")
+            logger.info(f"Processing mobile sync job {job.id}: {job.action}")
             job.status = JobStatus.PROCESSING
             self._write_job(processing_path, job)
             
@@ -86,7 +89,7 @@ class QueueJobHandler(FileSystemEventHandler):
                 # Attempt to mark as failed
                 with open(processing_path, "r+", encoding="utf-8") as f:
                     data = json.load(f)
-                    job = QueueJob(**data)
+                    job = MobileSyncJob(**data)
                     job.status = JobStatus.FAILED
                     job.error = str(e)
                     
@@ -96,11 +99,11 @@ class QueueJobHandler(FileSystemEventHandler):
             except Exception as nested_e:
                 logger.error(f"Could not construct/move failure payload: {nested_e}")
 
-    def _write_job(self, path: Path, job: QueueJob):
+    def _write_job(self, path: Path, job: MobileSyncJob):
         with open(path, "w", encoding="utf-8") as f:
             f.write(job.model_dump_json(indent=2))
 
-    def _execute_job(self, job: QueueJob):
+    def _execute_job(self, job: MobileSyncJob):
         # We need the MCP token to send instructions to the local Zotero
         token = resolve_zotero_mcp_token()
         if not token:
@@ -115,6 +118,19 @@ class QueueJobHandler(FileSystemEventHandler):
                 mm = MemoryManager(client)
                 payload = job.payload
                 project = payload.get("project", "")
+                
+                # Check for active project fallback if no specific project is given
+                if not project or project.lower() == "default":
+                    try:
+                        cols = mm.ensure_collections()
+                        settings = mm.get_settings(cols["system"])
+                        active_slug = settings.get("active_project_slug")
+                        if active_slug:
+                            logger.info(f"Using active project fallback: {active_slug}")
+                            project = active_slug
+                    except Exception as e:
+                        logger.warning(f"Could not resolve active project fallback: {e}")
+
                 mem_class = payload.get("mem_class", "unit")
                 role = payload.get("role", "observation")
                 title_label = payload.get("title_label", "")
@@ -138,19 +154,56 @@ class QueueJobHandler(FileSystemEventHandler):
                 )
 
                 mm.create_memory_item(m_item, cols["project"])
+                # Trigger an export after a new memory is created
+                self.export_zotero_data()
             else:
                 raise ValueError(f"Unknown action: {job.action}")
 
+    def export_zotero_data(self):
+        """Export recent Zotero items to a JSON file for the mobile search tool."""
+        try:
+            token = resolve_zotero_mcp_token()
+            cache_file = self.watch_dir / "ZoteroReadCache" / "mobile_search_cache.json"
+            
+            logger.info("Updating mobile search cache...")
+            with PluginClient(auth_token=token) as client:
+                # Fetch recent items and notes
+                items = client.get_recent_items(limit=100)
+                
+                # Format for the search tool
+                export_data = []
+                for item in items:
+                    if "error" in item: continue
+                    
+                    export_data.append({
+                        "id": item.get("key"),
+                        "title": item.get("title", "Untitled"),
+                        "type": item.get("itemType"),
+                        "abstract": item.get("abstract", ""),
+                        "note": item.get("note", ""), # For standalone notes
+                        "tags": item.get("tags", []),
+                        "date": item.get("dateAdded")
+                    })
+                
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(export_data, f, indent=2)
+                
+                self.last_export_time = time.time()
+                logger.info(f"Exported {len(export_data)} items to {cache_file}")
+                
+        except Exception as e:
+            logger.error(f"Failed to export search cache: {e}")
 
-def start_queue_worker_in_background(watch_dir_path: str):
+
+def start_mobile_sync_worker(watch_dir_path: str):
     """Starts the Watchdog observer in a daemon background thread."""
     watch_dir = Path(watch_dir_path)
     if not watch_dir.exists():
-        logger.warning(f"ZOTERO_QUEUE_WATCH_DIR {watch_dir} does not exist. Queue worker will not start.")
+        logger.warning(f"ZOTERO2AI_MOBILE_SYNC_WATCH_DIR {watch_dir} does not exist. Worker will not start.")
         return
 
-    logger.info(f"Starting async queue worker thread on {watch_dir}...")
-    handler = QueueJobHandler(watch_dir)
+    logger.info(f"Starting async mobile sync worker thread on {watch_dir}...")
+    handler = MobileSyncJobHandler(watch_dir)
     
     # Process already pending files before starting the watch
     handler.process_existing_files()
