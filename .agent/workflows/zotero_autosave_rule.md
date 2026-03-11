@@ -24,3 +24,8 @@ You SHOULD proactively suggest `memory_synthesize` (after user confirmation) whe
 
 > [!NOTE] 
 > Creating 'concept' and 'synthesis' memories DOES require user confirmation. However, basic 'unit' items under this autosave rule do NOT require permission.
+
+---
+## Implementation Reference
+- **Autosave Tool**: `mcp_zotero2ai_memory_create_item` in `src/zotero2ai/mcp_server/tools/memory.py`
+- **Prompts Logic**: `src/zotero2ai/mcp_server/tools/prompts.py` (register_prompts)

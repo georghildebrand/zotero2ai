@@ -263,3 +263,13 @@ def register_memory_tools(mcp: FastMCP):
                 return f"Updated mapping for '{project_slug}'."
         except Exception as e:
             return f"Error: {str(e)}"
+    @mcp.tool()
+    def memory_archive_item(key: str) -> str:
+        """Move a memory item to archived state."""
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                result = mm.archive_item(key)
+                return json.dumps(result, indent=2)
+        except Exception as e:
+            return f"Error archiving item: {str(e)}"

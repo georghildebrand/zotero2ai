@@ -36,7 +36,8 @@ Once new data is ingested, perform standard maintenance with a focus on cross-co
 
 3. **Tagging Hygiene**:
    - Review recent active `unit` and `concept` items.
-   - If an item is missing a domain tag, or the tags are too vague, update them using `memory_supersede` (or the internal tag update mechanism if available).
+   - If an item is missing a domain tag, or the tags are too vague, update them using `memory_supersede`.
+   - If an item is no longer operationally relevant (e.g. an old experiment that failed), use `memory_archive_item`.
 
 4. **Weekly Project Aggregation (FRIDAYS ONLY)**:
    - If today is Friday:
@@ -60,3 +61,9 @@ Success is reached when:
 3. The `centric` project has no more than 7 *active* units.
 4. On Fridays: A project-level "State of Play" has been created.
 5. A summary of newly created concepts/projects is provided to the user.
+
+---
+## Implementation Reference
+- **Core Memory Logic**: `src/zotero2ai/zotero/memory.py`
+- **Maintenance Tools**: `src/zotero2ai/mcp_server/tools/memory.py`
+- **Recursive Note Listing**: `src/zotero2ai/zotero/plugin_client.py` (Plugin interface)

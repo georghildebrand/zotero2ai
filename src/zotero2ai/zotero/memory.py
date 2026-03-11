@@ -453,14 +453,50 @@ class MemoryManager:
                 if notes:
                     note_key = notes[0]["key"]
                     self.client.update_note(key=note_key, tags=new_tags)
+                return {"old_key": old_key, "new_key": new_key, "status": "superseded"}
             except Exception as e:
-                logger.warning(f"Could not update old item tags: {e}")
+                logger.error(f"Error retagging old item {old_key}: {str(e)}")
+                return {"old_key": old_key, "new_key": new_key, "status": "new_created_link_failed"}
+        return {"old_key": old_key, "new_key": new_key, "status": "new_created_no_old_item"}
 
-        return {
-            "old_key": old_key,
-            "new_key": new_key,
-            "status": "superseded",
-        }
+    def archive_item(self, key: str) -> dict[str, Any]:
+        """Move a memory item from active/superseded to archived state.
+
+        1. Load current tags.
+        2. Remove existing state tags (active/superseded).
+        3. Add mem:state:archived.
+        4. Update Zotero item.
+
+        Args:
+            key: Zotero item key.
+
+        Returns:
+            Dict with key and status.
+        """
+        item = self.client.get_item(key)
+        if not item:
+            return {"key": key, "status": "error", "message": "not found"}
+
+        if isinstance(item, list):
+            item = item[0] if item else {}
+        
+        old_tags = item.get("tags", [])
+        new_tags = []
+        for t in old_tags:
+            tag_str = t.get("tag", "") if isinstance(t, dict) else str(t)
+            if tag_str in ["mem:state:active", "mem:state:superseded", "mem:state:archived"]:
+                continue
+            if tag_str:
+                new_tags.append(tag_str)
+        
+        new_tags.append("mem:state:archived")
+
+        try:
+            self.client.update_item(key=key, tags=new_tags)
+            return {"key": key, "status": "archived"}
+        except Exception as e:
+            logger.error(f"Error archiving item {key}: {str(e)}")
+            return {"key": key, "status": "error", "message": str(e)}
 
     def synthesize(
         self,

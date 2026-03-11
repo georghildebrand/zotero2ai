@@ -38,6 +38,9 @@ You SHOULD proactively suggest `memory_synthesize` (after user confirmation) whe
 3. **Session Transitions**: At the start of a major new phase, use `memory_suggest_consolidation` and ask if previous work should be archived/synthesized.
 *This prevents the memory project from becoming a cluttered list of raw data.*
 
+**WORKFLOW DISCOVERY**:
+For complex tasks (like daily maintenance, research planning, or deep synthesis), search for available Standard Operating Procedures (SOPs) using `memory_list_workflows`. You can then read the detailed steps using `memory_get_workflow_instructions`.
+
 **GUIDELINES**:
 - Keep memories ATOMIC. Extract distinct facts into separate MemoryItems.
 - ALWAYS use tags for categorization (e.g. `mem:domain:physics`, `mem:domain:software-development`).
