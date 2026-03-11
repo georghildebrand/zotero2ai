@@ -21,52 +21,85 @@ class MemoryManager:
 
     def ensure_collections(self, root_name: str = "Agent Memory", project_slug: str | None = None) -> dict[str, str]:
         """Ensure the root, system, and project collections exist.
-
+        
         Returns:
             dict mapping collection paths/slugs to their keys.
         """
-        keys = {}
+        # Resolve root
+        root_key = ""
+        cols = self.client.get_collections(parent_key="root")
+        for c in cols:
+            if c["name"] == root_name:
+                root_key = c["key"]
+                break
 
-        # 1. Ensure Root "Agent Memory"
-        root = self.client.search_collections(root_name)
-        root_key = None
-        if root:
-            # Take the exact match (since search is fuzzy)
-            exact_match = next((c for c in root if c["name"].lower() == root_name.lower()), None)
-            if exact_match:
-                root_key = exact_match["key"]
-        
         if not root_key:
-            resp = self.client.create_collection(root_name)
+            resp = self.client.create_collection(name=root_name)
             root_key = resp["key"]
-        keys["root"] = root_key
 
-        # 2. Ensure "_System"
-        system_name = "_System"
-        system = self.client.get_collections(parent_key=root_key)
-        system_key = next((c["key"] for c in system if c["name"] == system_name), None)
+        # Resolve system
+        system_key = ""
+        cols_sub = self.client.get_collections(parent_key=root_key)
+        for c in cols_sub:
+            if c["name"] == "_System":
+                system_key = c["key"]
+                break
+
         if not system_key:
-            resp = self.client.create_collection(system_name, parent_key=root_key)
+            resp = self.client.create_collection(name="_System", parent_key=root_key)
             system_key = resp["key"]
-        keys["system"] = system_key
 
-        # 3. Ensure Project Collection
+        # Resolve project if requested
+        project_key = ""
         if project_slug:
             # Map slug to display name: lora-geometry -> LoRA Geometry
             display_name = " ".join(word.capitalize() for word in project_slug.split("-"))
-            project = next((c["key"] for c in system if c["name"] == display_name), None)
-            if not project:
-                # Search in all children of root just in case
-                children = self.client.get_collections(parent_key=root_key)
-                project_key = next((c["key"] for c in children if c["name"] == display_name), None)
-                if not project_key:
-                    resp = self.client.create_collection(display_name, parent_key=root_key)
-                    project_key = resp["key"]
-            else:
-                project_key = project
-            keys["project"] = project_key
+            for c in cols_sub:
+                if c["name"] == display_name:
+                    project_key = c["key"]
+                    break
 
-        return keys
+            if not project_key:
+                resp = self.client.create_collection(display_name, parent_key=root_key)
+                project_key = resp["key"]
+
+        return {"root": root_key, "system": system_key, "project": project_key}
+
+    def initialize_system(self, root_name: str = "Agent Memory") -> str:
+        """Initialize the memory system structure and create a default tag registry."""
+        import yaml
+        
+        cols = self.ensure_collections(root_name=root_name)
+        
+        # Check if registry exists
+        registry_title = "[MEM][system][global] Tag Registry"
+        items = self.client.search_items(tag="mem:role:global", collection_key=cols["system"])
+        if any(i["title"] == registry_title for i in items):
+            return f"Memory system already initialized in '{root_name}'. System key: {cols['system']}"
+
+        # Create initial registry
+        default_registry = {
+            "allowed_tags": {
+                "mem:class:": ["unit", "concept", "project", "system"],
+                "mem:project:": [],
+                "mem:role:": ["question", "observation", "hypothesis", "result", "synthesis"],
+                "mem:state:": ["active", "superseded", "archived"],
+                "mem:source:": ["agent", "user", "paper", "conversation", "manual"],
+                "mem:domain:": [],
+            }
+        }
+        yaml_content = yaml.dump(default_registry, default_flow_style=False)
+        note_html = f"<pre>{yaml_content}</pre><hr/><p>Global Tag Registry for Zotero Agent Memory Pack.</p>"
+
+        resp = self.client.create_item(
+            item_type="report",
+            title=registry_title,
+            tags=["mem:class:system", "mem:role:global"],
+            collections=[cols["system"]],
+            note=note_html
+        )
+
+        return f"Successfully initialized memory system in '{root_name}'.\nRoot key: {cols['root']}\nSystem key: {cols['system']}\nRegistry item key: {resp.get('key')}"
 
     def get_registry(self, system_collection_key: str) -> dict[str, Any]:
         """Load the Tag Registry from the _System collection."""
@@ -185,6 +218,7 @@ class MemoryManager:
         date_to: str | None = None,
         limit: int = 20,
         root_name: str = "Agent Memory",
+        include_full_content: bool = False,
     ) -> list[dict[str, Any]]:
         """Structured recall of memory items with filtering.
 
@@ -260,6 +294,8 @@ class MemoryManager:
                         entry["state"] = getattr(mem, "state", "active")
                         entry["confidence"] = mem.confidence
                         entry["content_preview"] = mem.content[:200]
+                        if include_full_content:
+                            entry["content"] = mem.content
             except Exception:
                 pass  # Graceful degradation
             enriched.append(entry)
@@ -1202,3 +1238,80 @@ class MemoryManager:
             },
             "gaps": gaps
         }
+
+    def get_project_context(self, project_slug: str, root_name: str = "Agent Memory") -> str:
+        """Fetch a summary of all active memory items (concepts and units) for a project.
+        
+        Returns a formatted Markdown document for the agent to quickly ingest state.
+        """
+        # Fetch active concepts (high level)
+        concepts = self.recall(
+            project_slug=project_slug, 
+            state="active", 
+            tags=["mem:class:concept"], 
+            limit=20, 
+            root_name=root_name,
+            include_full_content=True
+        )
+        
+        # Fetch active units (raw/recent)
+        units = self.recall(
+            project_slug=project_slug, 
+            state="active", 
+            tags=["mem:class:unit"], 
+            limit=50, 
+            root_name=root_name,
+            include_full_content=False # Just previews for units to keep it concise
+        )
+        
+        if not concepts and not units:
+            return f"# Project Context: {project_slug}\n\nNo active memory items found. Start by observing or creating memories."
+            
+        lines = [f"# Project Context: {project_slug}", f"**Generated:** {datetime.now().isoformat()}", "\n---\n"]
+        
+        if concepts:
+            lines.append("## 🧠 High-Level Concepts & Strategic State")
+            for c in concepts:
+                lines.append(f"### {c['title']} (Key: {c['key']})")
+                lines.append(f"**Confidence:** {c.get('confidence', 'medium')} | **Role:** {c.get('role', 'synthesis')}")
+                lines.append(f"\n{c.get('content', c.get('content_preview', ''))}")
+                lines.append("\n")
+            lines.append("\n---\n")
+            
+        if units:
+            lines.append("## 📝 Active Observations & Findings")
+            for u in units:
+                role_label = u.get('role', 'unit').capitalize()
+                lines.append(f"- **{u['title']}** (Key: {u['key']}) [{role_label}]")
+                if u.get('content_preview'):
+                    lines.append(f"  > {u['content_preview']}...")
+            lines.append("\n")
+        
+        lines.append("---")
+        lines.append("*Use memory_recall with specific keys to see full content of individual units.*")
+            
+        return "\n".join(lines)
+
+    def add_project_todo(self, project_slug: str, content: str, root_name: str = "Agent Memory") -> dict[str, Any]:
+        """Add a lightweight TODO/Question to a project's memory."""
+        mem_id = MemoryItem.generate_mem_id(project_slug)
+        # Limit title length
+        title_summary = content[:50].replace("\n", " ")
+        if len(content) > 50:
+            title_summary += "..."
+            
+        m_item = MemoryItem(
+            mem_id=mem_id,
+            mem_class="unit",
+            role="question",
+            project=project_slug,
+            title=f"[MEM][unit][{project_slug}] TODO: {title_summary}",
+            content=content,
+            source="agent",
+            confidence="high",
+            tags=["mem:domain:management"]
+        )
+        
+        cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
+        return self.create_memory_item(m_item, cols["project"])
+
