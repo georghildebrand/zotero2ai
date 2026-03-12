@@ -146,6 +146,39 @@ def register_item_tools(mcp: FastMCP):
             return f"Error in create_or_extend_note: {str(e)}"
 
     @mcp.tool()
+    def note_create(content: str, collection_key: str | None = None, parent_item_key: str | None = None, tags: list[str] | None = None, related: list[str] | None = None) -> str:
+        """Create a new note (friendly wrapper)."""
+        return create_or_extend_note(
+            content=content,
+            collection_key=collection_key,
+            parent_item_key=parent_item_key,
+            extend=False,
+            tags=tags,
+            related=related,
+        )
+
+    @mcp.tool()
+    def note_extend(note_key: str, content: str, tags: list[str] | None = None, related: list[str] | None = None) -> str:
+        """Append content to an existing note (wrapper)."""
+        return create_or_extend_note(
+            content=content,
+            note_key=note_key,
+            extend=True,
+            tags=tags,
+            related=related,
+        )
+
+    @mcp.tool()
+    def note_update_tags(note_key: str, tags: list[str], related: list[str] | None = None) -> str:
+        """Update note tags/related links without touching content."""
+        try:
+            with get_client() as client:
+                client.update_note(note_key, tags=tags, related=related)
+            return f"Updated tags for note {note_key}."
+        except Exception as e:
+            return f"Error updating note tags: {str(e)}"
+
+    @mcp.tool()
     def get_item_attachments(item_key: str) -> str:
         """Get attachments for an item."""
         try:

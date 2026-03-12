@@ -137,6 +137,35 @@ def register_memory_tools(mcp: FastMCP):
             return f"Error updating tags: {str(e)}"
 
     @mcp.tool()
+    def memory_inspect(project: str | None = None, include_registry: bool = False, root_name: str = "Agent Memory") -> str:
+        """Summarize memory system state for hosts (non-destructive)."""
+        try:
+            with get_client() as client:
+                mm = MemoryManager(client)
+                cols = mm.ensure_collections(root_name=root_name, project_slug=project)
+                settings = mm.get_settings(cols["system"])
+                overview = {
+                    "root": cols["root"],
+                    "system": cols["system"],
+                    "project_key": cols.get("project"),
+                    "active_project_slug": settings.get("active_project_slug"),
+                    "projects": settings.get("projects", {}),
+                }
+
+                if include_registry:
+                    overview["registry"] = mm.get_registry(cols["system"])
+
+                # Consolidation candidates: keep light to avoid large payloads
+                try:
+                    overview["consolidation_candidates"] = mm.get_consolidation_candidates(project or settings.get("active_project_slug", ""), limit=10)
+                except Exception:
+                    overview["consolidation_candidates"] = []
+
+                return json.dumps(overview, indent=2, default=str)
+        except Exception as e:
+            return f"Error inspecting memory: {str(e)}"
+
+    @mcp.tool()
     def memory_recall(project: str | None = None, tags: list[str] | None = None, state: str = "active", date_from: str | None = None, date_to: str | None = None, limit: int = 20, root_name: str = "Agent Memory", include_content: bool = False) -> str:
         """Recall memory items."""
         try:
