@@ -8,9 +8,10 @@ Note: This is a work in progress and is not yet ready for production use. Also i
 
 `zotero2ai` allows AI agents to interact with your local Zotero library through a secure HTTP bridge plugin. It provides tools for searching items, reading collections, and performing full CRUD operations on notes.
 
-### Key Features (Milestone 0.2.0)
+### Key Features (Milestone 0.4.0)
 
 -   **Secure Plugin Bridge**: Communicates with Zotero via a local-only authenticated HTTP server.
+-   **Fast BM25 Search (FTS5)**: Local SQLite FTS5 index for full-text search across papers, notes, and collections (no external search engine needed).
 -   **Full Note CRUD**: Create, read, and update Zotero notes directly from your AI agent.
 -   **No Database Locks**: Avoids SQLite concurrency issues by using the Zotero internal API.
 -   **Friendly Name Discovery**: Automatically generates human-readable titles for notes.
@@ -71,28 +72,21 @@ export ZOTERO_DATA_DIR="/Users/yourname/Zotero"
 - **Execution:** Setting the `ZOTERO2AI_MOBILE_SYNC_WATCH_DIR` environment variable (or using the `--mobile-sync-dir` flag) automatically starts the mobile sync processor alongside the standard MCP server. It monitors the synced folder and commits offline updates the moment your laptop comes online.
 - **Automated Read Cache:** The worker automatically exports your recent Zotero items to a `ZoteroReadCache` subfolder within your watch directory, allowing your mobile LLM to search your library even while your laptop is offline.
 
-### Available Tools
+### Lean Tooling (30 tools)
 
-The following tools are exposed to the AI model:
+**Discovery & Collections**
+- `search_papers`, `get_recent_papers`, `list_collections`, `get_collection_tree`, `search_collections`, `get_collection_attachments`
 
--   `list_collections`: List open Zotero collections.
--   `search_papers`: Search for papers by title (includes attachment file paths and URLs).
--   `get_recent_papers`: Retrieve the most recently added items (includes attachment file paths and URLs).
--   `get_item_attachments`: Get all attachments and their file paths/URLs for a specific item.
--   `get_collection_attachments`: **Batch mode** - Get all attachments and file paths/URLs for all items in a collection.
--   `list_notes`: List notes with generated friendly names (filterable by collection/parent).
--   `read_note`: specific note content by key.
--   `create_or_extend_note`: Create a new note or append to an existing one.
--   `set_active_collection`: Set a default collection for new notes.
--   `get_active_collection`: Check which collection is currently active.
+**Notes & Attachments**
+- `list_notes`, `list_notes_recursive`, `read_note`, `create_or_extend_note`, `get_item_attachments`, `get_item_content`, `rename_tag`, `list_tags`, `set_active_collection`, `get_active_collection`
 
-#### Zotero Agent Memory Pack
-The Agent Memory Pack gives LLMs persistent, lifelong memory structured directly inside your Zotero library:
--   **Creation & Extraction**: `memory_create_item` and `memory_extract_from_text` (automatically reads and parses full Zotero PDFs into distinct facts).
--   **Retrieval & Recall**: `memory_recall` and `memory_timeline` allow agents to fetch project history by tags and dates.
--   **Consolidation**: `memory_suggest_consolidation` and `memory_synthesize` cluster raw observations into high-level concepts using keyword grouping.
--   **Visualization**: `memory_project_graph` exports a Mermaid.js dependency graph showing how your ideas evolved.
--   **Autosave Workflow**: Includes an `agent_memory_autosave` MCP prompt to instruct clients when to proactively persist high-utility facts.
+**Memory Core**
+- `memory_initialize`, `memory_get_registry`, `memory_create_item`, `memory_recall`, `memory_timeline`, `memory_supersede`, `memory_synthesize`, `memory_archive_item`, `memory_inspect`
+
+**Workflows & Overview**
+- `memory_overview`, `memory_list_workflows`, `memory_get_workflow_instructions`, `tool_catalog`, `host_tool_groups`
+
+Everything else was removed in 0.4.0 to prioritize speed and smaller payloads; hosts can hide unneeded tools via `host_tool_groups`.
 
 ## Usage
 

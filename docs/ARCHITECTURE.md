@@ -16,7 +16,7 @@ zotero2ai follows a modular architecture designed for local-first, read-only int
                           │                   │
                           ▼                   ▼
                   ┌──────────────┐    ┌──────────────┐
-                  │ Vector Index │    │ Zotero Storage│
+                  │ FTS5 Index   │    │ Zotero Storage│
                   └──────────────┘    └──────────────┘
 ```
 
@@ -35,12 +35,6 @@ src/zotero2ai/
 │   ├── items.py       # Metadata fetching
 │   └── text.py        # Text assembly for indexing
 │
-├── index/             # Local search logic
-│   ├── store.py       # FAISS index IO and metadata storage
-│   ├── embedder.py    # Sentence-transformers wrapper
-│   ├── pipeline.py    # Incremental indexing logic
-│   └── hybrid.py      # Hybrid (lexical + vector) scoring
-│
 └── mcp_server/        # MCP Interface
     ├── server.py      # FastMCP initialization and tool definitions
     └── schemas.py     # MCP tool input/output schemas
@@ -51,14 +45,14 @@ src/zotero2ai/
 - **CLI Module** (`cli.py`): Command-line interface with `doctor` (diagnostic) and `run` (MCP server) commands.
 - **Config Module** (`config.py`): Handles environment variable resolution and path validation for the Zotero data directory.
 - **Zotero Module** (`zotero/`): Encapsulates all direct interactions with the Zotero database. It uses a read-only SQLite connection to ensure data integrity.
-- **Index Module** (`index/`): Implements a local vector database using FAISS. It handles the transformation of Zotero items into searchable embeddings.
+- **Search Layer** (in `zotero/search_index.py`): Implements a single-file SQLite FTS5 index (BM25) for titles, abstracts, notes, tags, and collections. Rebuilds when Zotero DB mtime changes.
 - **MCP Server Module** (`mcp_server/`): Bridges the core logic to the AI Client using the Model Context Protocol, allowing tools like `search` or `get_item` to be used by LLMs.
 
 ## Data Flow
 
 1. **Initialization**: CLI resolves `ZOTERO_DATA_DIR` → Configures Logging → Starts MCP Server.
-2. **Indexing**: Background or on-demand process scans Zotero DB → Assembles text → Generates embeddings via Embedder → Updates FAISS Store.
-3. **Querying**: AI Client sends `search` tool call → MCP Server calls Hybrid Search → Hybrid Search combines FAISS results with metadata lookups → Ranked results returned to AI.
+2. **Indexing**: On-demand process scans Zotero DB → flattens collections/items/notes → writes to SQLite FTS5 sidecar (`search_index.db`) with BM25 ranking.
+3. **Querying**: AI Client sends `search` tool call → MCP Server uses FTS5 (lexical BM25) to rank results → returns titles/keys/tags.
 
 ## Architecture Diagrams
 

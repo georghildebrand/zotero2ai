@@ -1,7 +1,4 @@
 import logging
-import os
-import subprocess
-import sys
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -146,39 +143,6 @@ def register_item_tools(mcp: FastMCP):
             return f"Error in create_or_extend_note: {str(e)}"
 
     @mcp.tool()
-    def note_create(content: str, collection_key: str | None = None, parent_item_key: str | None = None, tags: list[str] | None = None, related: list[str] | None = None) -> str:
-        """Create a new note (friendly wrapper)."""
-        return create_or_extend_note(
-            content=content,
-            collection_key=collection_key,
-            parent_item_key=parent_item_key,
-            extend=False,
-            tags=tags,
-            related=related,
-        )
-
-    @mcp.tool()
-    def note_extend(note_key: str, content: str, tags: list[str] | None = None, related: list[str] | None = None) -> str:
-        """Append content to an existing note (wrapper)."""
-        return create_or_extend_note(
-            content=content,
-            note_key=note_key,
-            extend=True,
-            tags=tags,
-            related=related,
-        )
-
-    @mcp.tool()
-    def note_update_tags(note_key: str, tags: list[str], related: list[str] | None = None) -> str:
-        """Update note tags/related links without touching content."""
-        try:
-            with get_client() as client:
-                client.update_note(note_key, tags=tags, related=related)
-            return f"Updated tags for note {note_key}."
-        except Exception as e:
-            return f"Error updating note tags: {str(e)}"
-
-    @mcp.tool()
     def get_item_attachments(item_key: str) -> str:
         """Get attachments for an item."""
         try:
@@ -212,27 +176,6 @@ def register_item_tools(mcp: FastMCP):
             return f"Error getting content: {str(e)}"
 
     @mcp.tool()
-    def open_item(item_key: str) -> str:
-        """Open an item in local viewer."""
-        try:
-            with get_client() as client:
-                item = client.get_item(item_key)
-                if not item: return "Item not found."
-                path = item.get("path")
-                if not path:
-                    for att in item.get("attachments", []):
-                        if att.get("path"):
-                            path = att["path"]
-                            if att.get("contentType") == "application/pdf": break
-                if not path: return "No local path."
-                if sys.platform == "darwin": subprocess.call(["open", path])
-                elif sys.platform == "win32": os.startfile(path)
-                else: subprocess.call(["xdg-open", path])
-                return f"Opening: {path}"
-        except Exception as e:
-            return f"Error opening: {str(e)}"
-
-    @mcp.tool()
     def rename_tag(old_name: str, new_name: str) -> str:
         """Rename a tag."""
         try:
@@ -241,57 +184,6 @@ def register_item_tools(mcp: FastMCP):
                 return f"Renamed {old_name} to {new_name}."
         except Exception as e:
             return f"Error renaming tag: {str(e)}"
-
-    @mcp.tool()
-    def memory_consolidate_tags(old_tags: list[str], new_tag: str) -> str:
-        """Consolidate multiple tags into a single new tag library-wide.
-        
-        This is useful for ontological refactoring, e.g., merging variants of a tag.
-        If the new_tag already exists, Zotero will merge the tags.
-        """
-        try:
-            with get_client() as client:
-                for tag in old_tags:
-                    client.rename_tag(tag, new_tag)
-                return f"Successfully consolidated {len(old_tags)} tags into '{new_tag}'."
-        except Exception as e:
-            return f"Error consolidating tags: {str(e)}"
-
-    @mcp.tool()
-    def memory_move_item(item_key: str, collection_key: str) -> str:
-        """Move an item to a specific collection (replacing current collections)."""
-        try:
-            with get_client() as client:
-                client.update_item(item_key, collections=[collection_key])
-                return f"Successfully moved item {item_key} to collection {collection_key}."
-        except Exception as e:
-            return f"Error moving item: {str(e)}"
-
-    @mcp.tool()
-    def memory_lint_note(key: str) -> str:
-        """Check a note for standard project formatting and issues."""
-        try:
-            with get_client() as client:
-                note = client.get_note(key)
-                if not note: return "Note not found."
-                content = note.get("note", "")
-                
-                issues = []
-                if not content.strip(): issues.append("Note is empty.")
-                if "<pre>" not in content and "[MEM]" in note.get("title", ""):
-                    issues.append("Memory item note missing metadata block (<pre> tag).")
-                if "</h1>" in content or "<h1>" in content:
-                    issues.append("Avoid using <h1> in notes; use ## (h2) for main sections.")
-                
-                # Check for unclosed tags/markdown if possible
-                if content.count("```") % 2 != 0:
-                    issues.append("Unclosed markdown code block (```).")
-                
-                if not issues:
-                    return f"Note {key} looks good!"
-                return f"Issues found in Note {key}:\n- " + "\n- ".join(issues)
-        except Exception as e:
-            return f"Error linting note: {str(e)}"
 
     @mcp.tool()
     def list_tags() -> str:

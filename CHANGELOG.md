@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-12
+
+### Changed
+- Broke surface area down to 30 lean tools focused on speed and smaller token payloads. Removed legacy note wrappers and auxiliary memory helpers.
+- Memory API now centers on `memory_create_item`, `memory_recall`, `memory_timeline`, `memory_synthesize`, `memory_supersede`, `memory_archive_item`, `memory_inspect`, `memory_initialize`, `memory_get_registry`.
+- Items/notes keep only search, list, read, create/extend, attachments/content, tag rename/list, and collection helpers.
+- Host catalogs (`tool_catalog`, `host_tool_groups`) updated to the trimmed set; preferred list reflects the new minimal surface.
+- Documentation updated to describe FTS5/BM25 search instead of FAISS/vector, and to list the lean toolset.
+- Version bumped to 0.4.0.
+
 ## [0.3.0] - 2026-03-11
 
 ### Added
