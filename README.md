@@ -18,6 +18,7 @@ Note: This is a work in progress and is not yet ready for production use. Also i
 -   **Security First**: Uses 256-bit Bearer tokens and binds exclusively to the loopback interface (`127.0.0.1`).
 -   **Mobile Sync (Mobile Bridge)**: Cloud-free synchronization for mobile agents. Allows mobile LLMs to save memories and search your library offline using a NAS-based worker.
 -   **Agent Memory Pack**: A complete Zotero-native lifelong memory system for LLM agents. Features structured storage, semantic PDF extraction, automated topic consolidation, and Mermaid.js knowledge graphing.
+-   **Sidecar Memory Index (Hybrid State)**: Local SQLite sidecar that complements Zotero's "System of Record". Provides a global concept catalog, cross-project usage tracking, and automated duplicate detection during synthesis.
 
 ### SimpleMem Attribution
 
@@ -72,21 +73,42 @@ export ZOTERO_DATA_DIR="/Users/yourname/Zotero"
 - **Execution:** Setting the `ZOTERO2AI_MOBILE_SYNC_WATCH_DIR` environment variable (or using the `--mobile-sync-dir` flag) automatically starts the mobile sync processor alongside the standard MCP server. It monitors the synced folder and commits offline updates the moment your laptop comes online.
 - **Automated Read Cache:** The worker automatically exports your recent Zotero items to a `ZoteroReadCache` subfolder within your watch directory, allowing your mobile LLM to search your library even while your laptop is offline.
 
-### Lean Tooling (30 tools)
+### Tool Surface
 
-**Discovery & Collections**
-- `search_papers`, `get_recent_papers`, `list_collections`, `get_collection_tree`, `search_collections`, `get_collection_attachments`
+The MCP surface is now intentionally grouped into three levels:
 
-**Notes & Attachments**
-- `list_notes`, `list_notes_recursive`, `read_note`, `create_or_extend_note`, `get_item_attachments`, `get_item_content`, `rename_tag`, `list_tags`, `set_active_collection`, `get_active_collection`
+**Preferred**
+- `search_papers`, `list_notes_recursive`, `read_note`, `create_or_extend_note`
+- `memory_inspect`, `memory_create_item`, `memory_recall`, `memory_timeline`, `memory_synthesize`
+- `memory_catalog_search`, `memory_consolidate_concepts`, `memory_overview`
+- `memory_list_workflows`, `memory_get_workflow_instructions`
 
-**Memory Core**
-- `memory_initialize`, `memory_get_registry`, `memory_create_item`, `memory_recall`, `memory_timeline`, `memory_supersede`, `memory_synthesize`, `memory_archive_item`, `memory_inspect`
+**Advanced**
+- Collection navigation and attachments: `list_collections`, `search_collections`, `set_active_collection`, `get_active_collection`, `get_collection_tree`, `get_collection_attachments`, `list_notes`, `get_item_attachments`, `get_item_content`
+- Tags and recent reads: `rename_tag`, `list_tags`, `get_recent_papers`
+- Memory maintenance and sidecar detail tools: `memory_supersede`, `memory_archive_item`, `memory_catalog_list`, `memory_catalog_get_details`, `memory_catalog_list_candidates`, `memory_catalog_promote_candidate`
 
-**Workflows & Overview**
-- `memory_overview`, `memory_list_workflows`, `memory_get_workflow_instructions`, `tool_catalog`, `host_tool_groups`
+**Legacy**
+- `memory_initialize`, `memory_get_registry`
 
-Everything else was removed in 0.4.0 to prioritize speed and smaller payloads; hosts can hide unneeded tools via `host_tool_groups`.
+Hosts should surface `preferred` by default and keep `advanced` and `legacy` available for deliberate use via `host_tool_groups`.
+
+### Workflows
+
+Workflow discovery is also reduced to two levels:
+
+**General**
+- `general`
+  Shared operating guidance for memory hygiene, synthesis boundaries, and workflow selection.
+
+**Task-specific SOPs**
+- `daily_memory_maintenance`
+  Daily ingestion, cleanup, and concept-synthesis review pass.
+- `weekly_project_rollup`
+  Weekly concept-to-project rollup and state-of-play synthesis.
+
+Use `memory_list_workflows` to discover them and `memory_get_workflow_instructions` to load one on demand.
+These task-specific SOPs are also the intended targets for future automations.
 
 ## Usage
 
@@ -95,7 +117,7 @@ Everything else was removed in 0.4.0 to prioritize speed and smaller payloads; h
 Check if your Zotero setup and plugin connection are working:
 
 ```bash
-uv run zotero2ai doctor
+uv run python -m zotero2ai.cli doctor
 # OR
 make doctor
 ```
@@ -105,7 +127,7 @@ make doctor
 To interactively test all tools and prompts in a browser-based UI, use the official MCP Inspector:
 
 ```bash
-npx @modelcontextprotocol/inspector uv run mcp-zotero2ai run
+npx @modelcontextprotocol/inspector uv run python -m zotero2ai.cli run
 ```
 
 This will start an interactive session at `http://localhost:3000` where you can manually trigger tools like `memory_list_workflows` or `search_papers`.
@@ -117,21 +139,47 @@ Start the MCP server (with optional mobile sync worker):
 ```bash
 # Using environment variable
 export ZOTERO2AI_MOBILE_SYNC_WATCH_DIR="~/ZoteroQueue"
-uv run zotero2ai run
+uv run python -m zotero2ai.cli run
 
 # OR using command line flag
-uv run zotero2ai run --mobile-sync-dir ~/ZoteroQueue
+uv run python -m zotero2ai.cli run --mobile-sync-dir ~/ZoteroQueue
 
 # OR using make (if env var is in .env)
 make run
 ```
 
-### Run Standalone Sync Worker (Optional)
+### Rebuild Memory Index
 
-If you only want to run the worker (e.g. on a background machine) without the MCP server interface:
+Rebuild the sidecar index from Zotero Agent Memory:
 
 ```bash
-uv run zotero2ai sync-worker --watch-dir ~/ZoteroQueue
+uv run python -m zotero2ai.cli rebuild-memory-index
+```
+
+The mobile queue worker is no longer documented as a standalone CLI mode. It runs as part of the MCP server when `--mobile-sync-dir` or `ZOTERO2AI_MOBILE_SYNC_WATCH_DIR` is set.
+
+### Install System-Wide CLI
+
+If you want a simpler host setup without `uv --directory ...` or `PYTHONPATH=src`, install the CLI commands globally at the user level:
+
+```bash
+make install-system
+```
+
+This installs the `zotero2ai` and `mcp-zotero2ai` commands via `uv tool install --editable .`.
+
+After that, you can run:
+
+```bash
+mcp-zotero2ai doctor
+mcp-zotero2ai run
+mcp-zotero2ai rebuild-memory-index
+```
+
+To remove the global tool installation again:
+
+```bash
+make uninstall-system
 ```
 
 ### ChatGPT Desktop Integration
@@ -144,35 +192,50 @@ To integrate with ChatGPT Desktop, run the automated setup script (requires `ZOT
 
 ### Claude Code Integration
 
-To register `zotero2ai` as a global MCP server in Claude Code, run the following command:
+You can register `zotero2ai` in Claude Code in two ways.
+
+**Recommended after `make install-system`**
+
+This is the simplest setup once the CLI is globally available:
 
 ```bash
-# Register using the CLI (replace with your actual token)
-claude mcp add zotero2ai \
-  --scope user \
-  -e ZOTERO_MCP_TOKEN="your_generated_token_here" \
-  -- $(which uv) --directory $(pwd) run mcp-zotero2ai run
+claude mcp remove zotero2ai -s user
+
+claude mcp add -s user zotero2ai \
+  --env=ZOTERO_DATA_DIR="/Users/yourname/zotero" \
+  --env=ZOTERO_BRIDGE_PORT="23120" \
+  --env=ZOTERO_MCP_TOKEN="your_generated_token_here" \
+  -- mcp-zotero2ai run
 ```
 
-Alternatively, you can add it using a JSON string:
+**Source-tree registration**
+
+If you prefer to run directly from the repository checkout, remove any stale registration first and then add the current source-tree based command:
 
 ```bash
-claude mcp add-json zotero2ai '{
-    "command": "'$(which uv)'",
-    "args": [
-        "--directory",
-        "'$PWD'",
-        "run",
-        "mcp-zotero2ai",
-        "run"
-    ],
-    "env": {
-        "ZOTERO_MCP_TOKEN": "your_generated_token_here"
-    }
-}' --scope user
+# Remove an older registration if it still uses `mcp-zotero2ai run`
+claude mcp remove zotero2ai -s user
+
+# Register using the current CLI entrypoint (replace with your actual token)
+claude mcp add -s user zotero2ai \
+  --env=ZOTERO_DATA_DIR="/Users/yourname/zotero" \
+  --env=ZOTERO_BRIDGE_PORT="23120" \
+  --env=ZOTERO_MCP_TOKEN="your_generated_token_here" \
+  --env=PYTHONPATH="src" \
+  -- \
+  "$(which uv)" --directory "$(pwd)" run python -m zotero2ai.cli run
 ```
 
-or via pure mcp config
+You can verify the active registration with:
+
+```bash
+claude mcp get zotero2ai
+claude mcp list
+```
+
+The registered command should resolve to `uv --directory <repo> run python -m zotero2ai.cli run`, not `uv run mcp-zotero2ai run`.
+
+Alternatively, you can add it via pure MCP config:
 
 
 ```
@@ -184,13 +247,16 @@ or via pure mcp config
         "--directory",
         "/path/to/zotero2ai",
         "run",
-        "mcp-zotero2ai",
+        "python",
+        "-m",
+        "zotero2ai.cli",
         "run"
       ],
       "env": {
         "ZOTERO_DATA_DIR": "/path/to/zotero",
         "ZOTERO_BRIDGE_PORT": "23120",
         "ZOTERO_MCP_TOKEN": "your_generated_mcp_token_here",
+        "PYTHONPATH": "src",
         "PATH": "/path/to/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       },
       "disabled": false

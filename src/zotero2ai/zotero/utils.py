@@ -1,6 +1,7 @@
 import re
 from html import unescape
 from re import Match
+from typing import Any
 
 
 def clean_html(html_content: str, preserve_newlines: bool = False) -> str:
@@ -119,3 +120,35 @@ def normalize_tags(raw_tags: object) -> list[str]:
             continue
         normalized.append(str(tag))
     return normalized
+
+
+def repair_text_encoding(text: str) -> str:
+    """Best-effort repair for common UTF-8/Latin-1 mojibake."""
+    if not text:
+        return text
+
+    suspicious_markers = ("Ã", "Â", "â", "ð", "\ufffd")
+    if not any(marker in text for marker in suspicious_markers):
+        return text
+
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+    original_score = sum(text.count(marker) for marker in suspicious_markers)
+    repaired_score = sum(repaired.count(marker) for marker in suspicious_markers)
+    if repaired_score < original_score:
+        return repaired
+    return text
+
+
+def repair_payload_encoding(value: Any) -> Any:
+    """Recursively repair common mojibake in JSON-like payloads."""
+    if isinstance(value, str):
+        return repair_text_encoding(value)
+    if isinstance(value, list):
+        return [repair_payload_encoding(item) for item in value]
+    if isinstance(value, dict):
+        return {key: repair_payload_encoding(item) for key, item in value.items()}
+    return value

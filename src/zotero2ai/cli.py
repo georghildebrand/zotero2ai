@@ -75,15 +75,10 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Optional: Directory to watch for mobile sync jobs (if set, starts worker in background)",
     )
 
-    # sync-worker command
-    sync_parser = subparsers.add_parser(
-        "sync-worker",
-        help="Start the mobile sync worker standalone",
-    )
-    sync_parser.add_argument(
-        "--watch-dir",
-        default=None,
-        help="Directory to watch for sync jobs (reads ZOTERO2AI_MOBILE_SYNC_WATCH_DIR if not provided)",
+    # rebuild-memory-index command
+    subparsers.add_parser(
+        "rebuild-memory-index",
+        help="Rebuild the sidecar memory index from Zotero Agent Memory",
     )
 
     return parser.parse_args(args)
@@ -221,6 +216,38 @@ def cmd_run(
         return 1
 
 
+def cmd_rebuild_memory_index() -> int:
+    """Rebuild the sidecar memory index from Zotero."""
+    import asyncio
+    import logging
+    from zotero2ai.config import resolve_zotero_mcp_token, resolve_sidecar_db_path
+    from zotero2ai.zotero.plugin_client import PluginClient
+    from zotero2ai.zotero.memory import MemoryManager
+    from zotero2ai.memory_index.store import MemoryIndexStore
+    from zotero2ai.memory_index.bootstrap import rebuild_index
+
+    logger = logging.getLogger("zotero2ai.cli")
+    token = resolve_zotero_mcp_token()
+    if not token:
+        logger.error("✗ ZOTERO_MCP_TOKEN not found")
+        return 1
+
+    db_path = resolve_sidecar_db_path()
+    store = MemoryIndexStore(db_path)
+    
+    async def run():
+        with PluginClient(auth_token=token) as client:
+            mm = MemoryManager(client)
+            await rebuild_index(mm, store)
+
+    try:
+        asyncio.run(run())
+        return 0
+    except Exception as e:
+        logger.error(f"✗ Failed to rebuild memory index: {e}")
+        return 1
+
+
 def main() -> int:
     """Main entry point for the CLI.
 
@@ -242,32 +269,8 @@ def main() -> int:
             port=getattr(args, "port", 8765),
             mobile_sync_dir=getattr(args, "mobile_sync_dir", None),
         )
-    elif args.command == "sync-worker":
-        import os
-        import time
-        import logging
-        from zotero2ai.mobile_sync.worker import start_mobile_sync_worker
-        
-        logger = logging.getLogger("zotero2ai.cli")
-        watch_dir = args.watch_dir or os.environ.get("ZOTERO2AI_MOBILE_SYNC_WATCH_DIR")
-        
-        if not watch_dir:
-            logger.error("✗ No watch directory specified. Use --watch-dir or set ZOTERO2AI_MOBILE_SYNC_WATCH_DIR.")
-            return 1
-            
-        logger.info(f"Starting standalone mobile sync worker on {watch_dir}...")
-        observer = start_mobile_sync_worker(watch_dir)
-        if not observer:
-            return 1
-            
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Stopping worker...")
-            observer.stop()
-        observer.join()
-        return 0
+    elif args.command == "rebuild-memory-index":
+        return cmd_rebuild_memory_index()
     else:
         # No command specified, show help
         parse_args(["--help"])

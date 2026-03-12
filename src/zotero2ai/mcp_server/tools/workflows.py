@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import yaml
 from mcp.server.fastmcp import FastMCP
 
 from zotero2ai.mcp_server.common import get_client
@@ -32,6 +33,33 @@ def register_workflow_tools(mcp: FastMCP):
         
         return None
 
+    def parse_workflow_file(path: str) -> dict[str, str]:
+        metadata: dict[str, str] = {}
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        body = content
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                try:
+                    parsed = yaml.safe_load(parts[1]) or {}
+                    if isinstance(parsed, dict):
+                        metadata = {str(k): str(v) for k, v in parsed.items()}
+                    body = parts[2].lstrip()
+                except Exception:
+                    body = content
+
+        description = metadata.get("description", "No description available.")
+        if description == "No description available." and body.startswith("#"):
+            description = body.split("\n")[0].replace("#", "").strip()
+
+        metadata["description"] = description
+        metadata["body"] = body
+        metadata.setdefault("workflow_type", "task_sop")
+        metadata.setdefault("status", "active")
+        return metadata
+
     @mcp.tool()
     def memory_list_workflows() -> str:
         """List available agentic workflow templates (Standard Operating Procedures)."""
@@ -44,24 +72,20 @@ def register_workflow_tools(mcp: FastMCP):
             for filename in os.listdir(workflow_dir):
                 if filename.endswith(".md"):
                     path = os.path.join(workflow_dir, filename)
-                    with open(path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                        # Simple frontmatter/description extraction
-                        description = "No description available."
-                        if "description:" in content:
-                            lines = content.split("\n")
-                            for line in lines:
-                                if line.startswith("description:"):
-                                    description = line.replace("description:", "").strip()
-                                    break
-                        elif content.startswith("#"):
-                            description = content.split("\n")[0].replace("#", "").strip()
-                        
-                        workflows.append({
-                            "name": filename.replace(".md", ""),
-                            "description": description
-                        })
-            return json.dumps(workflows, indent=2)
+                    metadata = parse_workflow_file(path)
+                    workflows.append({
+                        "name": filename.replace(".md", ""),
+                        "description": metadata["description"],
+                        "workflow_type": metadata.get("workflow_type", "task_sop"),
+                        "status": metadata.get("status", "active"),
+                        "project_hint": metadata.get("project_hint", ""),
+                        "schedule_hint": metadata.get("schedule_hint", ""),
+                    })
+            workflows.sort(key=lambda wf: (wf["workflow_type"] != "general", wf["name"]))
+            return json.dumps({
+                "general": [w for w in workflows if w["workflow_type"] == "general"],
+                "task_sops": [w for w in workflows if w["workflow_type"] != "general"],
+            }, indent=2)
         except Exception as e:
             return f"Error listing workflows: {str(e)}"
 
@@ -79,8 +103,19 @@ def register_workflow_tools(mcp: FastMCP):
             return f"Error: Workflow '{workflow_name}' not found."
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
+            metadata = parse_workflow_file(path)
+            payload = {
+                "name": workflow_name,
+                "workflow_type": metadata.get("workflow_type", "task_sop"),
+                "status": metadata.get("status", "active"),
+                "description": metadata.get("description", ""),
+                "instructions": metadata.get("body", ""),
+            }
+            if metadata.get("project_hint"):
+                payload["project_hint"] = metadata["project_hint"]
+            if metadata.get("schedule_hint"):
+                payload["schedule_hint"] = metadata["schedule_hint"]
+            return json.dumps(payload, indent=2)
         except Exception as e:
             return f"Error reading workflow: {str(e)}"
 
@@ -110,8 +145,44 @@ def register_workflow_tools(mcp: FastMCP):
     def tool_catalog() -> str:
         """Grouped list of tools with recommended entry points (non-breaking)."""
         catalog = {
-            "collections": {
-                "recommended": ["list_collections", "get_collection_tree"],
+            "preferred": {
+                "recommended": [
+                    "search_papers",
+                    "list_notes_recursive",
+                    "read_note",
+                    "memory_inspect",
+                    "memory_seed_session",
+                    "memory_create_item",
+                    "memory_recall",
+                    "memory_timeline",
+                    "memory_catalog_search",
+                    "memory_consolidate_concepts",
+                    "memory_commit_episode",
+                    "memory_overview",
+                    "memory_list_workflows",
+                    "memory_get_workflow_instructions",
+                ],
+                "tools": [
+                    "search_papers",
+                    "read_note",
+                    "list_notes_recursive",
+                    "create_or_extend_note",
+                    "memory_inspect",
+                    "memory_seed_session",
+                    "memory_create_item",
+                    "memory_recall",
+                    "memory_timeline",
+                    "memory_synthesize",
+                    "memory_catalog_search",
+                    "memory_consolidate_concepts",
+                    "memory_commit_episode",
+                    "memory_overview",
+                    "memory_list_workflows",
+                    "memory_get_workflow_instructions",
+                ],
+            },
+            "advanced": {
+                "recommended": ["get_collection_tree", "list_collections", "memory_catalog_get_details"],
                 "tools": [
                     "list_collections",
                     "search_collections",
@@ -119,65 +190,76 @@ def register_workflow_tools(mcp: FastMCP):
                     "get_active_collection",
                     "get_collection_tree",
                     "get_collection_attachments",
-                ],
-            },
-            "items_and_notes": {
-                "recommended": ["search_papers", "list_notes", "create_or_extend_note"],
-                "tools": [
-                    "search_papers",
-                    "read_note",
                     "list_notes",
-                    "list_notes_recursive",
-                    "create_or_extend_note",
                     "get_item_attachments",
                     "get_item_content",
                     "rename_tag",
                     "list_tags",
                     "get_recent_papers",
+                    "memory_supersede",
+                    "memory_archive_item",
+                    "memory_catalog_list",
+                    "memory_catalog_get_details",
+                    "memory_catalog_list_candidates",
+                    "memory_catalog_promote_candidate",
                 ],
             },
-            "memory_core": {
-                "recommended": ["memory_create_item", "memory_recall", "memory_timeline"],
+            "legacy": {
+                "recommended": [],
                 "tools": [
                     "memory_initialize",
                     "memory_get_registry",
-                    "memory_create_item",
-                    "memory_recall",
-                    "memory_timeline",
-                    "memory_supersede",
-                    "memory_synthesize",
-                    "memory_archive_item",
-                    "memory_inspect",
                 ],
-            },
-            "memory_insights": {
-                "recommended": ["memory_overview"],
-                "tools": [
-                    "memory_overview",
-                    "memory_get_workflow_instructions",
-                    "memory_list_workflows",
-                ],
+                "notes": "Available for backward compatibility and setup flows, but not preferred for normal agent use.",
             },
         }
         return json.dumps(catalog, indent=2)
 
     @mcp.tool()
     def host_tool_groups() -> str:
-        """Host-facing grouped tool metadata with preferred/legacy flags."""
+        """Host-facing grouped tool metadata with preferred/advanced/legacy flags."""
         data = {
             "preferred": [
-                "list_collections",
-                "get_collection_tree",
                 "search_papers",
-                "list_notes",
+                "list_notes_recursive",
+                "read_note",
                 "create_or_extend_note",
+                "memory_inspect",
+                "memory_seed_session",
                 "memory_create_item",
                 "memory_recall",
                 "memory_timeline",
+                "memory_catalog_search",
+                "memory_consolidate_concepts",
+                "memory_commit_episode",
                 "memory_overview",
-                "memory_inspect",
+                "memory_list_workflows",
+                "memory_get_workflow_instructions",
             ],
-            "legacy": [],
-            "notes": "Surface preferred tools by default; others remain available but may be hidden in host UIs.",
+            "advanced": [
+                "list_collections",
+                "search_collections",
+                "set_active_collection",
+                "get_active_collection",
+                "get_collection_tree",
+                "get_collection_attachments",
+                "list_notes",
+                "get_item_attachments",
+                "get_item_content",
+                "rename_tag",
+                "list_tags",
+                "get_recent_papers",
+                "memory_supersede",
+                "memory_archive_item",
+                "memory_catalog_list",
+                "memory_catalog_get_details",
+                "memory_catalog_list_candidates",
+                "memory_catalog_promote_candidate",
+            ],
+            "legacy": [
+                "memory_initialize",
+                "memory_get_registry",
+            ],
+            "notes": "Surface preferred tools by default; keep advanced tools available for deliberate use; legacy tools remain for compatibility.",
         }
         return json.dumps(data, indent=2)

@@ -1,69 +1,48 @@
 ---
-description: Daily Zotero Memory Extraction and Synthesis
+description: Daily maintenance pass for ingesting fresh notes, cleaning units, and proposing concept synthesis
+workflow_type: task_sop
+status: active
+schedule_hint: daily
 ---
 
-# Zotero Memory Maintenance Workflow
+# Daily Memory Maintenance
 
-Run this workflow daily to ensure recent manual notes from meetings are ingested into the structured Agent Memory system and summarized into higher-level concepts.
+Use this workflow for a bounded daily pass over recent work. The goal is to keep units fresh, reduce duplication, and surface concept synthesis opportunities without silently creating broad abstractions.
 
-## Phase 1: Ingest Manual Meeting Notes
-Before reviewing existing structured memories, you must look for new raw data in your manual Zotero folders.
+## 1. Gather Today’s Context
+- Call `memory_inspect` first.
+- If the user already implies a project, use that project.
+- Otherwise pick the active project from `memory_inspect` or ask before writing.
 
-1. **Target Folder**: `00 Projects / 00 2024-10 Centric First Thoughts, Todos And notes` (Key: `IRZCVT92`).
-2. **Action**: 
-   - Call `list_notes_recursive` for this collection key.
-   - Set `date_from` to the last 48 hours (or since your last run).
-   - Set `include_content=True` to read the meeting notes.
-3. **Extraction**:
-   - For each new/relevant meeting note, extract atomic facts, decisions, or action items.
-   - Use `memory_create_item` to save these as `unit` class items in the `centric` project.
-   - Add appropriate domain tags (e.g., `mem:domain:business-process`, `mem:domain:meeting-minutes`).
-   - **Tagging**: Every new item MUST have at least one `mem:domain:<topic>` tag. Consult the `memory_get_registry` tool to see allowed domains or suggest new ones if the project evolves.
-- **Linking**: Use `memory_link_items` to link the new structured memory unit back to the original Zotero meeting note.
+## 2. Ingest Recent Notes Only
+- Use `list_notes_recursive` on the relevant collection or project subtree.
+- Restrict to a recent window such as the last 24 to 72 hours.
+- Use `include_content=True` only for notes that matter to the current task.
 
-## Phase 2: Maintenance & Synthesis
-Once new data is ingested, perform standard maintenance with a focus on cross-coherence:
+## 3. Create Or Update Units
+- Extract atomic facts, decisions, action items, and outcomes.
+- Save them with `memory_create_item(mem_class="unit", ...)`.
+- If a new note changes an older fact, prefer `memory_supersede`.
+- If a note is historical but no longer actionable, consider `memory_archive_item`.
 
-1. **Project Review & Context Retrieval**:
-   - Set active project: `memory_set_active_project(project_slug="centric")`.
-   - **Cross-Check Recall**: Call `memory_recall` for the `centric` project using the SAME `date_from` as in Phase 1. 
-   - Purpose: Retrieve any memories created *automatically* by agents during the same timeframe to provide context for the manual notes.
+## 4. Check For Duplicate Or Overlapping Meaning
+- Use `memory_recall` for the same project and recent time window.
+- Use `memory_catalog_search` before introducing new concept names.
+- If overlapping items describe the same reality, consolidate rather than adding parallel active units.
 
-2. **Coherence & De-duplication**:
-   - Compare the newly created `unit` items (from manual notes) with the retrieved existing memories.
-   - If a manual note and an existing memory cover the same fact: Use `memory_supersede` or `memory_synthesize` immediately to consolidate them.
-   - Look for contradictions: If a manual note contradicts an existing agent observation, flag this to the user or create a new `question` unit.
+## 5. Propose Concept Synthesis
+- Call `memory_consolidate_concepts(project=...)`.
+- If the project has several active units around one topic, propose `memory_synthesize` into a `concept`.
+- Use `supersede_sources=True` only when the source units are truly replaced by the synthesis.
 
-3. **Tagging Hygiene**:
-   - Review recent active `unit` and `concept` items.
-   - If an item is missing a domain tag, or the tags are too vague, update them using `memory_supersede`.
-   - If an item is no longer operationally relevant (e.g. an old experiment that failed), use `memory_archive_item`.
+## 6. Close The Loop
+- Return a short maintenance summary:
+- new units created
+- items superseded or archived
+- concept syntheses proposed or created
+- unresolved contradictions or blind spots
 
-4. **Weekly Project Aggregation (FRIDAYS ONLY)**:
-   - If today is Friday:
-   - Call `memory_recall` for all `concept` class items in the `centric` project.
-   - Synthesize these into a single `project` class item titled "[MEM][project][centric] Weekly State of Play: YYYY-MM-DD".
-   - This should summarize the week's key decisions and strategic shifts.
-
-5. **Synthesis & Consolidation**:
-   - Call `memory_suggest_consolidation(project="centric")`.
-   - Cluster the new `unit` items (from today) with existing ones.
-   - If a topic has >= 3 observations, use `memory_synthesize` to create a `concept`.
-   - Set `supersede_sources=True` to keep the active memory view clean.
-
-6. **Graphing**:
-   - Periodically run `memory_project_graph(project="centric")` to visualize the evolution of the project knowledge.
-
-## Termination Criteria
-Success is reached when:
-1. All recent notes from the meeting folder are mirrored as structured `unit` items.
-2. All new items have correct `mem:domain:*` tags.
-3. The `centric` project has no more than 7 *active* units.
-4. On Fridays: A project-level "State of Play" has been created.
-5. A summary of newly created concepts/projects is provided to the user.
-
----
-## Implementation Reference
-- **Core Memory Logic**: `src/zotero2ai/zotero/memory.py`
-- **Maintenance Tools**: `src/zotero2ai/mcp_server/tools/memory.py`
-- **Recursive Note Listing**: `src/zotero2ai/zotero/plugin_client.py` (Plugin interface)
+## Exit Criteria
+- Recent relevant notes are represented as structured units.
+- No obvious duplicate active units remain unaddressed.
+- Concept creation stays reviewable and deliberate.

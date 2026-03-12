@@ -104,31 +104,28 @@ test-install: build ## Test wheel install in isolated virtualenv
 # =============================================================================
 
 doctor:  ## Run diagnostics to check Zotero configuration
-> $(UV) run mcp-zotero2ai doctor
+> $(UV) run python -m zotero2ai.cli doctor
 
 run:  ## Run MCP server (stdio, managed by MCP host — loads .env)
-> $(UV) run mcp-zotero2ai run
+> $(UV) run python -m zotero2ai.cli run
 
 serve-sse:  ## Run MCP server in SSE mode (self-hosted, loads .env) — use with zotero2ai-sse config
 > @echo "Starting MCP server in SSE mode on http://$(SSE_HOST):$(SSE_PORT)/sse"
 > @echo "  Set ZOTERO_MCP_TOKEN in .env before running."
-> $(UV) run mcp-zotero2ai run --transport sse --host $(SSE_HOST) --port $(SSE_PORT)
-
-sync-worker:  ## Start the standalone mobile sync worker (loads .env)
-> $(UV) run mcp-zotero2ai sync-worker
+> $(UV) run python -m zotero2ai.cli run --transport sse --host $(SSE_HOST) --port $(SSE_PORT)
 
 run-help:  ## Show CLI help
-> $(UV) run mcp-zotero2ai --help
+> $(UV) run python -m zotero2ai.cli --help
 
 # =============================================================================
 # SYSTEM INSTALL (DEV-ONLY)
 # =============================================================================
 
-install-system: build  ## Install built wheel into user site-packages (dev-only)
-> $(PYTHON_SYSTEM) -m pip install --user dist/*.whl --force-reinstall --break-system-packages
+install-system:  ## Install CLI commands globally with uv tool (user-level, editable)
+> $(UV) tool install --force --editable .
 
 uninstall-system:  ## Remove system installation
-> $(PYTHON_SYSTEM) -m pip uninstall -y zotero2ai || true
+> $(UV) tool uninstall zotero2ai || true
 
 # =============================================================================
 # VALIDATION & CI

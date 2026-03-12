@@ -35,7 +35,7 @@ You MUST call `memory_create_item` automatically without waiting for user permis
 You SHOULD proactively suggest `memory_synthesize` (after user confirmation) when:
 1. **Vertical Convergence**: Multiple observations confirm or refute an hypothesis. Synthesize them into a permanent `concept`.
 2. **Horizontal Density**: A project contains many atomic units (>5-10) without a summary. create a "State of Play" or "Architecture Overview" synthesis.
-3. **Session Transitions**: At the start of a major new phase, use `memory_suggest_consolidation` and ask if previous work should be archived/synthesized.
+3. **Session Transitions**: At the start of a major new phase, use `memory_consolidate_concepts` and ask if previous work should be archived/synthesized.
 *This prevents the memory project from becoming a cluttered list of raw data.*
 
 **WORKFLOW DISCOVERY**:

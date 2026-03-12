@@ -8,6 +8,7 @@ import logging
 from typing import Any, cast
 
 import httpx
+from zotero2ai.zotero.utils import repair_payload_encoding
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ class PluginClient:
                 message = f"{e}\nResponse body: {body or '<empty response body>'}"
                 raise httpx.HTTPStatusError(message, request=e.request, response=e.response) from e
 
-            return cast(dict[str, Any], response.json())
+            return cast(dict[str, Any], repair_payload_encoding(response.json()))
 
         except httpx.ConnectError as e:
             raise PluginConnectionError(f"Failed to connect to plugin at {self.base_url}. Ensure the Zotero MCP Bridge plugin is installed and Zotero is running.") from e

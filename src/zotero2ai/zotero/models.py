@@ -83,6 +83,11 @@ class MemoryItem:
     source_uri: str | None = None  # Original URL or conversation link
     relations: list[dict[str, str]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    catalog_concept_id: str | None = None  # Global concept ID for sidecar
+    repos: list[str] = field(default_factory=list)
+    ticket_ids: list[str] = field(default_factory=list)
+    architecture_refs: list[str] = field(default_factory=list)
+    implementation_instructions: list[str] = field(default_factory=list)
 
     def generate_tags(self) -> list[str]:
         """Derive Zotero tags from metadata axes."""
@@ -119,6 +124,11 @@ class MemoryItem:
             "updated_at": self.updated_at,
             "collections": self.collections,
             "relations": self.relations,
+            "catalog_concept_id": self.catalog_concept_id,
+            "repos": self.repos,
+            "ticket_ids": self.ticket_ids,
+            "architecture_refs": self.architecture_refs,
+            "implementation_instructions": self.implementation_instructions,
         }
         # Use a safe YAML dumper that's readable
         from typing import cast
@@ -213,21 +223,30 @@ class MemoryItem:
             tag_name = t.get("tag", "") if isinstance(t, dict) else str(t)
             clean_tags.append(tag_name)
 
+        def get_val(d: dict[str, Any], k: str, default: Any = "") -> Any:
+            v = d.get(k)
+            return v if v is not None else default
+
         return cls(
-            mem_id=metadata.get("mem_id", f"mem.{project}.unknown"),
+            mem_id=get_val(metadata, "mem_id", f"mem.{project}.unknown"),
             mem_class=mem_class,
             role=role or "observation",
             project=project or "unknown",
             title=title,
             content=content_text or title,
-            summary=item_data.get("abstractNote") or item_data.get("abstract") or "",
+            summary=get_val(item_data, "abstractNote", get_val(item_data, "abstract")),
             state=state,
-            version=metadata.get("version", 1),
-            source=metadata.get("source", "unknown"),
+            version=int(get_val(metadata, "version", 1)),
+            source=get_val(metadata, "source", "unknown"),
             source_item_key=metadata.get("source_item_key"),
             source_uri=metadata.get("source_uri"),
-            confidence=metadata.get("confidence", "medium"),
-            created_at=metadata.get("created_at", item_data.get("dateAdded", "")),
-            updated_at=metadata.get("updated_at", item_data.get("dateModified", "")),
+            confidence=get_val(metadata, "confidence", "medium"),
+            created_at=get_val(metadata, "created_at", get_val(item_data, "dateAdded")),
+            updated_at=get_val(metadata, "updated_at", get_val(item_data, "dateModified")),
             tags=clean_tags,
+            catalog_concept_id=metadata.get("catalog_concept_id"),
+            repos=list(metadata.get("repos", []) or []),
+            ticket_ids=list(metadata.get("ticket_ids", []) or []),
+            architecture_refs=list(metadata.get("architecture_refs", []) or []),
+            implementation_instructions=list(metadata.get("implementation_instructions", []) or []),
         )

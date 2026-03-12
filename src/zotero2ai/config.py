@@ -6,6 +6,8 @@ This module handles the resolution and validation of the Zotero data directory.
 import os
 from pathlib import Path
 
+import platformdirs
+
 
 class ZoteroDataDirNotFoundError(FileNotFoundError):
     """Raised when the Zotero data directory cannot be found or is invalid."""
@@ -110,3 +112,18 @@ def validate_zotero_data_dir(data_dir: Path) -> None:
         raise ZoteroDataDirNotFoundError(
             f"Invalid Zotero data directory: {data_dir}\nMissing required directory: storage/\nPlease set ZOTERO_DATA_DIR to a valid Zotero data directory."
         )
+
+
+def resolve_sidecar_dir() -> Path:
+    """Resolve the directory for the sidecar memory index state.
+
+    Uses platformdirs to find a suitable user data directory.
+    """
+    app_dir = Path(platformdirs.user_data_dir("zotero2ai"))
+    app_dir.mkdir(parents=True, exist_ok=True)
+    return app_dir
+
+
+def resolve_sidecar_db_path() -> Path:
+    """Resolve the path to the sidecar SQLite database."""
+    return resolve_sidecar_dir() / "catalog.sqlite"

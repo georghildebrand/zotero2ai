@@ -1,6 +1,8 @@
 """Memory manager for Zotero storage, implementing Zotero Agent Memory Pack v0.1."""
 
 import logging
+import re
+import collections
 from typing import Any, cast
 
 import yaml  # type: ignore[import-untyped]
@@ -16,8 +18,89 @@ logger = logging.getLogger(__name__)
 class MemoryManager:
     """Manages Zotero Agent Memory Pack v0.1 items."""
 
-    def __init__(self, client: PluginClient):
+    def __init__(self, client: PluginClient, store: Any = None):
         self.client = client
+        if store is None:
+            try:
+                from zotero2ai.config import resolve_sidecar_db_path
+                from zotero2ai.memory_index.store import MemoryIndexStore
+                self.store = MemoryIndexStore(resolve_sidecar_db_path())
+            except Exception as e:
+                logger.warning(f"Could not initialize sidecar store: {e}")
+                self.store = None
+        else:
+            self.store = store
+
+    def _sync_to_sidecar(self, item_key: str):
+        """Update sidecar for a specific item."""
+        if not self.store: return
+        try:
+            raw_item = self.client.get_item(item_key)
+            if not raw_item: return
+            if isinstance(raw_item, list): raw_item = raw_item[0]
+            
+            notes = self.client.get_notes(parent_item_key=item_key)
+            note_content = notes[0]["note"] if notes else ""
+            
+            mem_item = MemoryItem.from_zotero_data(raw_item, note_content)
+            if not mem_item: return
+
+            if mem_item.mem_class == "concept":
+                from zotero2ai.memory_index.types import CatalogConcept
+                cat_id = mem_item.catalog_concept_id or self.store.make_catalog_concept_id(mem_item.title)
+                self.store.add_concept(CatalogConcept(
+                    catalog_concept_id=cat_id,
+                    title=mem_item.title,
+                    concept_label=self.store.extract_concept_label(mem_item.title),
+                    summary=mem_item.summary,
+                    state="stable" if mem_item.state == "active" else "archived"
+                ))
+                self.store.register_usage(mem_item.project, cat_id, item_key)
+            elif mem_item.mem_class == "unit" and mem_item.state == "active":
+                self._refresh_project_candidates(mem_item.project)
+        except Exception as e:
+            logger.warning(f"Failed to sync item {item_key} to sidecar: {e}")
+
+    def _ensure_concept_identity(self, item: MemoryItem):
+        if not self.store or item.mem_class != "concept" or item.catalog_concept_id:
+            return
+        label = self.store.extract_concept_label(item.title)
+        item.catalog_concept_id = self.store.make_catalog_concept_id(label)
+
+    def _normalize_unit_candidate_label(self, title: str) -> str:
+        label = self.store.extract_concept_label(title) if self.store else title
+        label = re.sub(r"\s+", " ", label).strip()
+        return label
+
+    def _refresh_project_candidates(self, project: str, threshold: int = 3):
+        if not self.store or not project:
+            return
+
+        items = self.recall(project_slug=project, state="active", limit=1000)
+        counts: collections.Counter[str] = collections.Counter()
+        labels_by_normalized: dict[str, str] = {}
+        existing_concepts = self.store.list_project_concept_labels(project)
+
+        for item in items:
+            if item.get("mem_class") != "unit":
+                continue
+            title = item.get("title", "")
+            label = self._normalize_unit_candidate_label(title)
+            normalized = self.store.normalize_concept_label(label)
+            if len(normalized.split()) < 2:
+                continue
+            if normalized in existing_concepts:
+                continue
+            counts[normalized] += 1
+            labels_by_normalized.setdefault(normalized, label)
+
+        self.store.delete_candidates_for_project(project)
+        for normalized, evidence_count in counts.items():
+            if evidence_count < threshold:
+                continue
+            title = labels_by_normalized[normalized]
+            candidate_id = self.store.make_candidate_id(project, title)
+            self.store.add_candidate(candidate_id, title, evidence_count=evidence_count, project=project)
 
     def ensure_collections(self, root_name: str = "Agent Memory", project_slug: str | None = None) -> dict[str, str]:
         """Ensure the root, system, and project collections exist.
@@ -161,11 +244,12 @@ class MemoryManager:
         """Create a Zotero memory item with metadata and child note."""
         # Note: Registry validation and collection ensuring should be handled by the caller (MCP tool)
         # to avoid repeated heavy lookups, or we can do it here if needed.
+        self._ensure_concept_identity(item)
 
         tags = item.generate_tags()
         note_html = item.to_note_html()
 
-        return self.client.create_item(
+        resp = self.client.create_item(
             item_type="report",  # Phase 1 Standard
             title=item.title,
             tags=tags,
@@ -173,6 +257,41 @@ class MemoryManager:
             note=note_html,
             fields={"abstractNote": item.summary} if item.summary else None,
         )
+        if "key" in resp:
+            self._sync_to_sidecar(resp["key"])
+        return resp
+
+    @staticmethod
+    def _dedupe_strings(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(cleaned)
+        return result
+
+    def _collect_operational_refs(self, memories: list[dict[str, Any]]) -> dict[str, list[str]]:
+        repos: list[str] = []
+        ticket_ids: list[str] = []
+        architecture_refs: list[str] = []
+        implementation_instructions: list[str] = []
+        for mem in memories:
+            repos.extend([str(v) for v in mem.get("repos", []) if isinstance(v, str)])
+            ticket_ids.extend([str(v) for v in mem.get("ticket_ids", []) if isinstance(v, str)])
+            architecture_refs.extend([str(v) for v in mem.get("architecture_refs", []) if isinstance(v, str)])
+            implementation_instructions.extend([str(v) for v in mem.get("implementation_instructions", []) if isinstance(v, str)])
+        return {
+            "repos": self._dedupe_strings(repos),
+            "ticket_ids": self._dedupe_strings(ticket_ids),
+            "architecture_refs": self._dedupe_strings(architecture_refs),
+            "implementation_instructions": self._dedupe_strings(implementation_instructions),
+        }
 
     def search_memory(
         self,
@@ -220,6 +339,7 @@ class MemoryManager:
         limit: int = 20,
         root_name: str = "Agent Memory",
         include_full_content: bool = False,
+        catalog_concept_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Structured recall of memory items with filtering.
 
@@ -237,6 +357,8 @@ class MemoryManager:
         """
         # Build tag list
         tag_list: list[str] = []
+        if project_slug:
+            tag_list.append(f"mem:project:{project_slug}")
         if state:
             tag_list.append(f"mem:state:{state}")
         if tags:
@@ -289,14 +411,25 @@ class MemoryManager:
                 if notes:
                     mem = MemoryItem.from_zotero_data(item, notes[0].get("note", ""))
                     if mem:
+                        if project_slug and mem.project != project_slug:
+                            continue
                         entry["mem_id"] = mem.mem_id
                         entry["mem_class"] = mem.mem_class
                         entry["role"] = mem.role
                         entry["state"] = getattr(mem, "state", "active")
                         entry["confidence"] = mem.confidence
+                        entry["catalog_concept_id"] = mem.catalog_concept_id
+                        entry["repos"] = mem.repos
+                        entry["ticket_ids"] = mem.ticket_ids
+                        entry["architecture_refs"] = mem.architecture_refs
+                        entry["implementation_instructions"] = mem.implementation_instructions
                         entry["content_preview"] = mem.content[:200]
                         if include_full_content:
                             entry["content"] = mem.content
+                        
+                        # Apply late filter for catalog_concept_id if requested
+                        if catalog_concept_id and mem.catalog_concept_id != catalog_concept_id:
+                            continue
             except Exception:
                 pass  # Graceful degradation
             enriched.append(entry)
@@ -336,6 +469,8 @@ class MemoryManager:
                 if notes:
                     mem = MemoryItem.from_zotero_data(item, notes[0].get("note", ""))
                     if mem:
+                        if mem.project != project_slug:
+                            continue
                         entry["mem_id"] = mem.mem_id
                         entry["mem_class"] = mem.mem_class
                         entry["role"] = mem.role
@@ -452,7 +587,9 @@ class MemoryManager:
                 notes = self.client.get_notes(parent_item_key=old_key)
                 if notes:
                     note_key = notes[0]["key"]
-                    self.client.update_note(key=note_key, tags=new_tags)
+                    self.client.update_note(note_key, tags=new_tags)
+                
+                self._sync_to_sidecar(old_key)
                 return {"old_key": old_key, "new_key": new_key, "status": "superseded"}
             except Exception as e:
                 logger.error(f"Error retagging old item {old_key}: {str(e)}")
@@ -493,6 +630,7 @@ class MemoryManager:
 
         try:
             self.client.update_item(key=key, tags=new_tags)
+            self._sync_to_sidecar(key)
             return {"key": key, "status": "archived"}
         except Exception as e:
             logger.error(f"Error archiving item {key}: {str(e)}")
@@ -550,6 +688,7 @@ class MemoryManager:
                         notes = self.client.get_notes(parent_item_key=skey)
                         if notes:
                             self.client.update_note(key=notes[0]["key"], tags=new_tags)
+                        self._sync_to_sidecar(skey)
                         retagged.append(skey)
                     except Exception as e:
                         logger.warning(f"Failed to supersede source {skey}: {e}")
@@ -561,8 +700,14 @@ class MemoryManager:
         }
 
     def get_consolidation_candidates(self, project: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Fetch and cluster recent active raw memory items from a project for potential synthesis.
-        """
+        """Return merge/consolidation suggestions for human review."""
+        if self.store:
+            try:
+                return self.store.get_consolidation_candidates(project=project, limit=limit)
+            except Exception as e:
+                logger.warning(f"Failed sidecar consolidation lookup for project {project}: {e}")
+
+        # Fallback heuristic for cases where the sidecar is unavailable.
         items = self.recall(project, tags=["mem:state:active"], limit=limit)
         
         candidates = []
@@ -645,6 +790,184 @@ class MemoryManager:
             })
             
         return final_clusters
+
+    def seed_session(
+        self,
+        project_slug: str,
+        task: str | None = None,
+        depth: str = "adaptive",
+        root_name: str = "Agent Memory",
+    ) -> dict[str, Any]:
+        """Build a project-first session bootstrap packet for coding and research work."""
+        inspect_data: dict[str, Any] = {}
+        try:
+            cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
+            inspect_data = {
+                "project_slug": project_slug,
+                "project_key": cols.get("project"),
+            }
+        except Exception:
+            inspect_data = {"project_slug": project_slug}
+
+        project_items = self.recall(
+            project_slug=project_slug,
+            state="active",
+            tags=["mem:class:project"],
+            limit=5,
+            root_name=root_name,
+            include_full_content=True,
+        )
+        concept_items = self.recall(
+            project_slug=project_slug,
+            state="active",
+            tags=["mem:class:concept"],
+            limit=12 if depth != "deep" else 20,
+            root_name=root_name,
+            include_full_content=True,
+        )
+        unit_limit = 0
+        if depth == "deep":
+            unit_limit = 12
+        elif depth == "adaptive":
+            unit_limit = 6
+        unit_items: list[dict[str, Any]] = []
+        if unit_limit:
+            unit_items = self.recall(
+                project_slug=project_slug,
+                state="active",
+                tags=["mem:class:unit"],
+                limit=unit_limit,
+                root_name=root_name,
+                include_full_content=False,
+            )
+
+        consolidation_candidates = []
+        try:
+            consolidation_candidates = self.get_consolidation_candidates(project_slug, limit=5)
+        except Exception:
+            consolidation_candidates = []
+
+        refs = self._collect_operational_refs(project_items + concept_items + unit_items)
+        project_summary = ""
+        if project_items:
+            project_summary = project_items[0].get("content", "") or project_items[0].get("content_preview", "")
+        elif concept_items:
+            project_summary = concept_items[0].get("content", "") or concept_items[0].get("content_preview", "")
+
+        open_questions = [u for u in unit_items if u.get("role") == "question"][:5]
+        research_suggestions: list[str] = []
+        if not refs["repos"]:
+            research_suggestions.append("No relevant repos captured yet; inspect project-level implementation context.")
+        if not refs["architecture_refs"]:
+            research_suggestions.append("No architecture references captured yet; consider retrieving system design context.")
+        if consolidation_candidates:
+            research_suggestions.append("Concept consolidation candidates exist; inspect before creating new concepts.")
+
+        return {
+            "project": project_slug,
+            "task": task,
+            "depth": depth,
+            "project_brief": {
+                "summary": project_summary,
+                "repos": refs["repos"],
+                "ticket_ids": refs["ticket_ids"],
+                "architecture_refs": refs["architecture_refs"],
+                "implementation_instructions": refs["implementation_instructions"],
+                "risks": [],
+                "next_reads": [item.get("title", "") for item in concept_items[:3] if item.get("title")],
+            },
+            "relevant_concepts": concept_items,
+            "relevant_units": unit_items,
+            "open_questions": open_questions,
+            "consolidation_candidates": consolidation_candidates,
+            "research_suggestions": research_suggestions,
+            "inspect": inspect_data,
+        }
+
+    def commit_episode(
+        self,
+        project_slug: str,
+        task_summary: str,
+        learnings: list[str],
+        decisions: list[str] | None = None,
+        changes_made: list[str] | None = None,
+        open_questions: list[str] | None = None,
+        repos: list[str] | None = None,
+        ticket_ids: list[str] | None = None,
+        architecture_refs: list[str] | None = None,
+        implementation_instructions: list[str] | None = None,
+        root_name: str = "Agent Memory",
+    ) -> dict[str, Any]:
+        """Persist the outcome of a coding or research episode as atomic unit memories."""
+        cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
+        created: list[dict[str, str]] = []
+
+        shared_kwargs = {
+            "project": project_slug,
+            "source": "agent",
+            "confidence": "high",
+            "repos": repos or [],
+            "ticket_ids": ticket_ids or [],
+            "architecture_refs": architecture_refs or [],
+            "implementation_instructions": implementation_instructions or [],
+        }
+
+        items_to_write: list[MemoryItem] = []
+        for text in learnings:
+            items_to_write.append(MemoryItem(
+                mem_id=MemoryItem.generate_mem_id(project_slug),
+                mem_class="unit",
+                role="result",
+                title=f"[MEM][unit][{project_slug}] Learning: {text[:60]}",
+                content=f"Episode: {task_summary}\n\nLearning:\n{text}",
+                **shared_kwargs,
+            ))
+        for text in decisions or []:
+            items_to_write.append(MemoryItem(
+                mem_id=MemoryItem.generate_mem_id(project_slug),
+                mem_class="unit",
+                role="observation",
+                title=f"[MEM][unit][{project_slug}] Decision: {text[:60]}",
+                content=f"Episode: {task_summary}\n\nDecision:\n{text}",
+                **shared_kwargs,
+            ))
+        for text in changes_made or []:
+            items_to_write.append(MemoryItem(
+                mem_id=MemoryItem.generate_mem_id(project_slug),
+                mem_class="unit",
+                role="result",
+                title=f"[MEM][unit][{project_slug}] Change: {text[:60]}",
+                content=f"Episode: {task_summary}\n\nChange:\n{text}",
+                **shared_kwargs,
+            ))
+        for text in open_questions or []:
+            items_to_write.append(MemoryItem(
+                mem_id=MemoryItem.generate_mem_id(project_slug),
+                mem_class="unit",
+                role="question",
+                title=f"[MEM][unit][{project_slug}] Open Question: {text[:60]}",
+                content=f"Episode: {task_summary}\n\nOpen question:\n{text}",
+                **shared_kwargs,
+            ))
+
+        for item in items_to_write:
+            resp = self.create_memory_item(item, cols["project"])
+            created.append({"key": str(resp.get("key", "")), "title": item.title, "role": item.role})
+
+        synthesis_hint = self.check_synthesis_needed(project_slug)
+        consolidation_candidates = []
+        try:
+            consolidation_candidates = self.get_consolidation_candidates(project_slug, limit=5)
+        except Exception:
+            consolidation_candidates = []
+
+        return {
+            "project": project_slug,
+            "task_summary": task_summary,
+            "created_units": created,
+            "synthesis_hint": synthesis_hint,
+            "consolidation_candidates": consolidation_candidates,
+        }
 
     def find_duplicates(self, title_query: str, project: str, limit: int = 5) -> list[dict[str, Any]]:
         """Search for potential duplicate memory items in the same project.
@@ -1143,7 +1466,7 @@ class MemoryManager:
         """Aggregates all recent notes in a collection into a single Markdown document.
         
         This is designed to be fed directly to an agent to generate new Memory Items
-        and decision logs via bulk_memory_create.
+        and decision logs via `memory_create_item` and follow-up synthesis tools.
         """
         # Fetch all notes including content, passing cursor=0 and a large limit
         # In a real environment we might want to paginate, but for a digest we need everything up to a limit
@@ -1384,4 +1707,3 @@ class MemoryManager:
         
         cols = self.ensure_collections(root_name=root_name, project_slug=project_slug)
         return self.create_memory_item(m_item, cols["project"])
-
