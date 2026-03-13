@@ -50,8 +50,8 @@ async def test_tool_list_collections(mcp, env_vars):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_tool_search_papers(mcp, env_vars):
-    """Test search_papers tool."""
+async def test_tool_find_document_title_hit(mcp, env_vars):
+    """find_document should return title-search matches without collection fallback."""
     respx.get("http://127.0.0.1:23120/items/search").mock(
         return_value=httpx.Response(
             200,
@@ -69,10 +69,119 @@ async def test_tool_search_papers(mcp, env_vars):
             },
         )
     )
+    respx.get("http://127.0.0.1:23120/collections/search").mock(
+        return_value=httpx.Response(200, json={"success": True, "data": []})
+    )
 
-    result = await mcp.call_tool("search_papers", {"query": "clean"})
-    assert any("### Clean Code" in str(item) for item in result)
-    assert any("- Key: I1" in str(item) for item in result)
+    result = await mcp.call_tool("find_document", {"query": "clean"})
+    rendered = "\n".join(str(item) for item in result)
+    assert "### Clean Code" in rendered
+    assert "- Key: I1" in rendered
+    assert "Strategy: consolidated multi-retrieval" in rendered
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_tool_find_document_public_regression(mcp, env_vars):
+    """Regression benchmark for fuzzy document lookup with collection fallback."""
+    respx.get("http://127.0.0.1:23120/items/search").mock(
+        return_value=httpx.Response(200, json={"success": True, "data": []})
+    )
+
+    respx.get("http://127.0.0.1:23120/collections/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": [
+                    {
+                        "key": "GENESET01",
+                        "name": "Gene Ontology Analysis",
+                        "fullPath": "Research / Gene Ontology Analysis",
+                        "childCount": 0,
+                    }
+                ],
+            },
+        )
+    )
+
+    respx.get("http://127.0.0.1:23120/collections/GENESET01/items").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": [
+                    {
+                        "key": "DOC123",
+                        "title": "GoSurfer: A Graphical Interactive Tool For Comparative Analysis of Large Gene Sets in Gene Ontology Space",
+                        "itemType": "journalArticle",
+                        "creators": ["Zhong, Sheng", "Storch, Kevin F.", "Lipan, Ovidiu", "Kao, Ming-Chih J.", "Weitz, Christian J.", "Wong, Wing Hung"],
+                        "date": "2004",
+                        "attachments": [
+                            {
+                                "key": "ATTACH123",
+                                "title": "PDF",
+                                "contentType": "application/pdf",
+                                "path": "/tmp/gosurfer.pdf",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+    )
+
+    result = await mcp.call_tool(
+        "find_document",
+        {"query": "GoSurfer: A Graphical Interactive Tool For Comparative Analysis of Large Gene Sets in Gene Ontology Space"},
+    )
+
+    rendered = "\n".join(str(item) for item in result)
+    assert "DOC123" in rendered
+    assert "GoSurfer: A Graphical Interactive Tool For Comparative Analysis of Large Gene Sets in Gene Ontology Space" in rendered
+    assert "consolidated multi-retrieval" in rendered
+    assert "collection scan in Research / Gene Ontology Analysis" in rendered
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_tool_find_document_exact_title_long_query_regression(mcp, env_vars):
+    """Long exact-title queries should still resolve to the correct paper."""
+
+    def items_search_handler(request: httpx.Request) -> httpx.Response:
+        q = request.url.params.get("q", "")
+        if q == "integrative":
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "key": "FKH9NEG7",
+                            "title": "Integrative computational design and construction: Rethinking architecture digitally",
+                            "itemType": "journalArticle",
+                            "creators": ["Knippers, Jan"],
+                            "date": "2020",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(200, json={"success": True, "data": []})
+
+    respx.get("http://127.0.0.1:23120/items/search").mock(side_effect=items_search_handler)
+    respx.get("http://127.0.0.1:23120/collections/search").mock(
+        return_value=httpx.Response(200, json={"success": True, "data": []})
+    )
+
+    query = "Integrative computational design and construction: Rethinking architecture digitally"
+    result = await mcp.call_tool("find_document", {"query": query, "limit": 1})
+    rendered = "\n".join(str(item) for item in result)
+
+    assert "## Document Matches" in rendered
+    assert f"- Query: {query}" in rendered
+    assert "### Integrative computational design and construction: Rethinking architecture digitally" in rendered
+    assert "- Key: FKH9NEG7" in rendered
+    assert "Match Reason: token fallback via 'integrative'" in rendered
 
 
 @respx.mock

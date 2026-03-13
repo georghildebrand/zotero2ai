@@ -388,14 +388,21 @@ var RequestHandlers = class {
             }
 
             const libraries = libraryIDParam ? [{ id: parseInt(libraryIDParam) }] : Zotero.Libraries.getAll();
-            let allItemIDs = [];
+            const allItemIDsSet = new Set();
 
-            for (const lib of libraries) {
+            const runSearch = async (libraryID, queryValue) => {
                 const s = new Zotero.Search();
-                s.libraryID = lib.id;
+                s.libraryID = libraryID;
 
-                if (searchQuery) {
-                    s.addCondition('title', 'contains', searchQuery);
+                if (queryValue) {
+                    // Mirror Zotero's "All Fields" behavior instead of title-only matching.
+                    // This allows matches from creators, publication fields, and indexed text.
+                    try {
+                        s.addCondition('quicksearch-everything', 'contains', queryValue);
+                    } catch (e) {
+                        // Fallback for compatibility if quicksearch condition is unavailable.
+                        s.addCondition('title', 'contains', queryValue);
+                    }
                 }
 
                 // Support multiple tags (comma-separated): "mem:class:unit,mem:state:active"
@@ -410,7 +417,7 @@ var RequestHandlers = class {
                     s.addCondition('collection', 'is', collectionKey);
                 }
 
-                // Date range filtering (defaults to dateAdded if no sortBy specified, 
+                // Date range filtering (defaults to dateAdded if no sortBy specified,
                 // but if sortBy is dateModified, use that for filtering too)
                 const dateField = (sortBy === 'dateModified') ? 'dateModified' : 'dateAdded';
                 if (dateFrom) {
@@ -423,10 +430,53 @@ var RequestHandlers = class {
                 s.addCondition('itemType', 'isNot', 'attachment');
                 // s.addCondition('itemType', 'isNot', 'note'); // We WANT notes in the review/timeline
 
-                const itemIDs = await s.search();
-                allItemIDs = allItemIDs.concat(itemIDs);
-                if (allItemIDs.length >= limit) break;
+                return await s.search();
+            };
+
+            const buildQueryVariants = (rawQuery) => {
+                const variants = [];
+                const seen = new Set();
+                const pushVariant = (value) => {
+                    const v = (value || '').trim();
+                    if (!v) return;
+                    const key = v.toLowerCase();
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    variants.push(v);
+                };
+
+                pushVariant(rawQuery);
+
+                // Fallback: long phrases often miss due parser quirks; retry with selective tokens.
+                const stopwords = new Set(['and', 'the', 'of', 'for', 'with', 'through', 'into', 'from', 'a', 'an', 'to']);
+                const tokens = rawQuery
+                    .toLowerCase()
+                    .split(/[\s:;,.!?()"'[\]{}]+/)
+                    .map(t => t.trim())
+                    .filter(t => t.length >= 4 && !stopwords.has(t));
+
+                for (const token of tokens.slice(0, 8)) {
+                    pushVariant(token);
+                }
+
+                return variants;
+            };
+
+            const queryVariants = buildQueryVariants(searchQuery);
+
+            for (const lib of libraries) {
+                for (const variant of queryVariants) {
+                    const itemIDs = await runSearch(lib.id, variant);
+                    for (const id of itemIDs || []) {
+                        allItemIDsSet.add(id);
+                    }
+                    if (allItemIDsSet.size >= limit) {
+                        break;
+                    }
+                }
+                if (allItemIDsSet.size >= limit) break;
             }
+            const allItemIDs = Array.from(allItemIDsSet);
 
             // If sortBy is requested, load items for sorting before limiting
             if ((sortBy === 'dateAdded' || sortBy === 'dateModified') && allItemIDs.length > 0) {

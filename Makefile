@@ -89,6 +89,9 @@ lint:  ## Lint and type-check
 test:  ## Run tests
 > $(UV) run pytest tests/ -v
 
+regression-tests:  ## Run critical regression tests (document retrieval + MCP search stability)
+> $(UV) run pytest tests/test_mcp_tools.py -k "find_document" -v
+
 test-cov:  ## Run tests with coverage
 > $(UV) run pytest tests/ -v \
 >   --cov=src/zotero2ai --cov-report=html --cov-report=term-missing
@@ -143,6 +146,6 @@ ci: check  ## Alias for CI systems
 
 all: check build ## Full pipeline (check + build)
 
-.PHONY: help setup install build clean distclean format format-check lint test test-cov \
+.PHONY: help setup install build clean distclean format format-check lint test regression-tests test-cov \
         test-install doctor run run-help serve-sse validate check ci all \
         install-system uninstall-system build-plugin

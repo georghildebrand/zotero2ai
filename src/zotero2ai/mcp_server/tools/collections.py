@@ -33,7 +33,8 @@ def register_collection_tools(mcp: FastMCP):
         except Exception as e:
             return f"Error listing collections: {str(e)}"
 
-    @mcp.tool()
+    # Legacy helper: intentionally not exposed as MCP tool anymore.
+    # `find_document` should be used for primary retrieval.
     def search_collections(query: str, limit: int = 10) -> str:
         """Search for Zotero collections by name (fuzzy).
         

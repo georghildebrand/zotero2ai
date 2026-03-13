@@ -1,5 +1,7 @@
 import logging
-from typing import Any
+import re
+from difflib import SequenceMatcher
+from typing import Any, cast
 
 from mcp.server.fastmcp import FastMCP
 from zotero2ai.mcp_server.common import get_client
@@ -9,8 +11,153 @@ from zotero2ai.zotero.utils import clean_html, generate_friendly_name
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_search_text(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _search_tokens(query: str) -> list[str]:
+    stopwords = {
+        "pdf",
+        "we",
+        "hk",
+        "abrg",
+        "korr",
+        "und",
+        "der",
+        "die",
+        "das",
+    }
+    tokens: list[str] = []
+    for token in _normalize_search_text(query).split():
+        if len(token) <= 1:
+            continue
+        if token in stopwords:
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def _similarity_score(query: str, *texts: str) -> float:
+    normalized_query = _normalize_search_text(query)
+    if not normalized_query:
+        return 0.0
+
+    best = 0.0
+    query_tokens = set(_search_tokens(query))
+    for text in texts:
+        normalized_text = _normalize_search_text(text or "")
+        if not normalized_text:
+            continue
+        ratio = SequenceMatcher(None, normalized_query, normalized_text).ratio()
+        text_tokens = set(normalized_text.split())
+        overlap = len(query_tokens & text_tokens) / max(len(query_tokens), 1)
+        best = max(best, ratio * 0.65 + overlap * 0.35)
+    return best
+
+
+def _document_search_variants(query: str) -> list[str]:
+    normalized = _normalize_search_text(query)
+    tokens = _search_tokens(query)
+    variants: list[str] = [query]
+    if normalized and normalized != query:
+        variants.append(normalized)
+    if tokens:
+        variants.append(" ".join(tokens))
+        if len(tokens) > 4:
+            variants.append(" ".join(sorted(tokens, key=len, reverse=True)[:4]))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        compact = variant.strip()
+        if not compact:
+            continue
+        key = compact.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(compact)
+    return deduped
+
+
+def _token_fallback_variants(query: str, max_tokens: int = 8) -> list[str]:
+    """Build additional robust token fallbacks for long, punctuation-heavy titles."""
+    stopwords = {
+        "and",
+        "the",
+        "of",
+        "for",
+        "with",
+        "through",
+        "into",
+        "from",
+        "a",
+        "an",
+        "to",
+    }
+    variants: list[str] = []
+    seen: set[str] = set()
+    for token in _normalize_search_text(query).split():
+        if len(token) < 4:
+            continue
+        if token in stopwords:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        variants.append(token)
+        if len(variants) >= max_tokens:
+            break
+    return variants
+
+
+def _format_item_result(item: dict[str, Any], score: float | None = None, reason: str | None = None) -> str:
+    creators_list = item.get("creators", [])
+    creators = ", ".join(creators_list) if creators_list else "Unknown Authors"
+    item_info = (
+        f"### {item.get('title', 'Untitled')}\n"
+        f"- Key: {item['key']}\n"
+        f"- Type: {item.get('itemType', 'unknown')}\n"
+        f"- Creators: {creators}\n"
+        f"- Date: {item.get('date', 'Unknown')}"
+    )
+    if score is not None:
+        item_info += f"\n- Match Score: {score:.3f}"
+    if reason:
+        item_info += f"\n- Match Reason: {reason}"
+    if item.get("url"):
+        item_info += f"\n- URL: {item['url']}"
+    if item.get("tags"):
+        item_info += f"\n- Tags: {', '.join(item['tags'])}"
+
+    attachments = item.get("attachments", [])
+    if attachments:
+        item_info += "\n- Attachments:"
+        for att in attachments:
+            item_info += f"\n  - {att['title']} ({att['contentType']})"
+            if att.get("path"):
+                item_info += f"\n    Path: `{att['path']}`"
+    return item_info
+
+
+def _rank_document_candidates(query: str, items: list[dict[str, Any]], reason: str) -> list[tuple[float, dict[str, Any], str]]:
+    ranked: list[tuple[float, dict[str, Any], str]] = []
+    for item in items:
+        candidate_texts = [item.get("title", "")]
+        for attachment in item.get("attachments", []):
+            candidate_texts.append(attachment.get("title", ""))
+            candidate_texts.append(attachment.get("path", ""))
+        score = _similarity_score(query, *candidate_texts)
+        if score > 0:
+            ranked.append((score, item, reason))
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+    return ranked
+
 def register_item_tools(mcp: FastMCP):
-    @mcp.tool()
+    # Legacy helper: intentionally not exposed as MCP tool anymore.
+    # Keep it temporarily for local fallback/reference during migration.
     def search_papers(query: str | None = None, tag: str | None = None, collection_key: str | None = None, limit: int = 10) -> str:
         """Search for papers by title or tag in the Zotero library.
 
@@ -35,23 +182,119 @@ def register_item_tools(mcp: FastMCP):
                     if "error" in item:
                         lines.append(f"### Item {item.get('key', 'unknown')}\n- Error: {item['error']}")
                         continue
-
-                    creators_list = item.get("creators", [])
-                    creators = ", ".join(creators_list) if creators_list else "Unknown Authors"
-                    item_info = f"### {item.get('title', 'Untitled')}\n- Key: {item['key']}\n- Type: {item.get('itemType', 'unknown')}\n- Creators: {creators}\n- Date: {item.get('date', 'Unknown')}"
-                    if item.get("url"): item_info += f"\n- URL: {item['url']}"
-                    if item.get("tags"): item_info += f"\n- Tags: {', '.join(item['tags'])}"
-                    
-                    attachments = item.get("attachments", [])
-                    if attachments:
-                        item_info += "\n- Attachments:"
-                        for att in attachments:
-                            item_info += f"\n  - {att['title']} ({att['contentType']})"
-                            if att.get("path"): item_info += f"\n    Path: `{att['path']}`"
-                    lines.append(item_info)
+                    lines.append(_format_item_result(item))
                 return "\n\n".join(lines)
         except Exception as e:
             return f"Error searching papers: {str(e)}"
+
+    @mcp.tool()
+    def find_document(query: str, collection_key: str | None = None, limit: int = 5, cursor: int = 0) -> str:
+        """Find a Zotero document by consolidated multi-strategy retrieval.
+
+        Strategies are executed together (title/keyword, token fallback, and optional
+        collection scans), then merged and de-duplicated into one ranked result set.
+        """
+        try:
+            with get_client() as client:
+                capped_limit = max(1, min(limit, 10))
+                safe_cursor = max(0, cursor)
+                candidate_map: dict[str, dict[str, Any]] = {}
+
+                def add_candidates(items: list[dict[str, Any]], reason: str) -> None:
+                    for score, item, _ in _rank_document_candidates(query, items, reason):
+                        key = item["key"]
+                        existing = candidate_map.get(key)
+                        if not existing:
+                            candidate_map[key] = {
+                                "score": score,
+                                "item": item,
+                                "reasons": {reason},
+                            }
+                            continue
+                        if score > float(existing["score"]):
+                            existing["score"] = score
+                        cast_reasons = existing["reasons"]
+                        if isinstance(cast_reasons, set):
+                            cast_reasons.add(reason)
+
+                # Strategy 1: collection-constrained scan when explicitly requested.
+                if collection_key:
+                    items = client.get_collection_items(collection_key, limit=500)
+                    add_candidates(items, f"collection-constrained scan in {collection_key}")
+
+                # Strategy 2: direct query variants over item search.
+                for variant in _document_search_variants(query):
+                    items = client.search_items(query=variant, collection_key=collection_key, limit=max(limit, 10))
+                    add_candidates(items, f"title search via '{variant}'")
+
+                # Strategy 3: token fallback queries for long phrases.
+                for token_variant in _token_fallback_variants(query):
+                    items = client.search_items(query=token_variant, collection_key=collection_key, limit=max(limit, 10))
+                    add_candidates(items, f"token fallback via '{token_variant}'")
+
+                # Strategy 4: semantic collection discovery + collection scans (global mode only).
+                collection_queries: list[str] = []
+                tokens = _search_tokens(query)
+                if tokens:
+                    collection_queries.append(" ".join(sorted(tokens, key=len, reverse=True)[:2]))
+                    collection_queries.extend(sorted(tokens, key=len, reverse=True)[:3])
+
+                candidate_collections: dict[str, dict[str, Any]] = {}
+                for collection_query in collection_queries:
+                    for collection in client.search_collections(collection_query, limit=5):
+                        candidate_collections[collection["key"]] = collection
+
+                ranked_collection_keys = sorted(
+                    candidate_collections,
+                    key=lambda key: _similarity_score(
+                        query,
+                        candidate_collections[key].get("name", ""),
+                        candidate_collections[key].get("fullPath", ""),
+                    ),
+                    reverse=True,
+                )
+
+                if not collection_key:
+                    for key in ranked_collection_keys[:3]:
+                        collection = candidate_collections[key]
+                        items = client.get_collection_items(key, limit=100)
+                        add_candidates(items, f"collection scan in {collection.get('fullPath', key)}")
+
+                consolidated = sorted(
+                    [
+                        (float(data["score"]), data["item"], ", ".join(sorted(cast(set[str], data["reasons"]))))
+                        for data in candidate_map.values()
+                    ],
+                    key=lambda entry: entry[0],
+                    reverse=True,
+                )
+                total = len(consolidated)
+                if total == 0:
+                    if collection_key:
+                        return f"No documents found matching '{query}' in collection '{collection_key}'."
+                    return f"No documents found matching '{query}'."
+
+                page = consolidated[safe_cursor:safe_cursor + capped_limit]
+                next_cursor = safe_cursor + capped_limit if safe_cursor + capped_limit < total else None
+
+                lines = [
+                    "## Document Matches",
+                    "- Strategy: consolidated multi-retrieval",
+                    f"- Query: {query}",
+                    f"- Total candidates: {total}",
+                    f"- Returned: {len(page)} (cursor={safe_cursor}, limit={capped_limit})",
+                ]
+                if collection_key:
+                    lines.append(f"- Collection: {collection_key}")
+                if next_cursor is not None:
+                    lines.append(f"- Next cursor: {next_cursor}")
+
+                for score, item, reason in page:
+                    lines.append("")
+                    lines.append(_format_item_result(item, score=score, reason=reason))
+                return "\n".join(lines)
+        except Exception as e:
+            return f"Error finding document: {str(e)}"
 
     @mcp.tool()
     def get_recent_papers(limit: int = 5) -> str:

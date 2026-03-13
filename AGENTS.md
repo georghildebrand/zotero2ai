@@ -16,6 +16,7 @@ Use the repository-local `uv` environment and prefer the source tree explicitly:
 uv run python -m zotero2ai.cli doctor
 uv run python -m zotero2ai.cli run
 uv run python -m zotero2ai.cli rebuild-memory-index
+make regression-tests
 ```
 
 If mobile sync is needed, run it via the main server:
@@ -70,9 +71,9 @@ If the user starts with `@zotero/find`, interpret it as a targeted retrieval req
 
 Expected behavior:
 - infer whether the user is looking for a paper, a concept, a note, or a collection
-- prefer `search_papers` for bibliography-like requests
+- prefer `find_document` for bibliography-like requests and document retrieval
 - prefer `memory_catalog_search` or `memory_recall` for memory/concept retrieval
-- prefer `search_collections` when the user is trying to locate the right Zotero collection
+- use `list_collections` only when explicit collection navigation is needed
 - keep retrieval project-first, not global-first
 
 ### `@zotero/recall`
@@ -128,3 +129,10 @@ Use `memory_list_workflows` and `memory_get_workflow_instructions` when a task c
 - The system may propose consolidation or synthesis, but explicit tool calls create concepts and project rollups.
 - Prefer `memory_seed_session` at session start and `memory_commit_episode` at session close for coding-heavy work.
 - When `project` or `project_slug` is provided for recall-style operations, treat it as a hard boundary. Do not widen retrieval across sibling Agent Memory projects.
+
+## Testing Guardrail
+
+- We use regression tests as a default safety net for critical retrieval behavior.
+- If a change touches `find_document`, MCP retrieval orchestration, plugin search behavior, or query normalization/ranking logic, run:
+  - `make regression-tests`
+- Treat regressions in long-title lookup as release-blocking for MCP retrieval changes.

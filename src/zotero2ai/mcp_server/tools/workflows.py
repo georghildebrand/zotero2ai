@@ -147,7 +147,7 @@ def register_workflow_tools(mcp: FastMCP):
         catalog = {
             "preferred": {
                 "recommended": [
-                    "search_papers",
+                    "find_document",
                     "list_notes_recursive",
                     "read_note",
                     "memory_inspect",
@@ -163,7 +163,7 @@ def register_workflow_tools(mcp: FastMCP):
                     "memory_get_workflow_instructions",
                 ],
                 "tools": [
-                    "search_papers",
+                    "find_document",
                     "read_note",
                     "list_notes_recursive",
                     "create_or_extend_note",
@@ -185,7 +185,6 @@ def register_workflow_tools(mcp: FastMCP):
                 "recommended": ["get_collection_tree", "list_collections", "memory_catalog_get_details"],
                 "tools": [
                     "list_collections",
-                    "search_collections",
                     "set_active_collection",
                     "get_active_collection",
                     "get_collection_tree",
@@ -220,7 +219,7 @@ def register_workflow_tools(mcp: FastMCP):
         """Host-facing grouped tool metadata with preferred/advanced/legacy flags."""
         data = {
             "preferred": [
-                "search_papers",
+                "find_document",
                 "list_notes_recursive",
                 "read_note",
                 "create_or_extend_note",
@@ -238,7 +237,6 @@ def register_workflow_tools(mcp: FastMCP):
             ],
             "advanced": [
                 "list_collections",
-                "search_collections",
                 "set_active_collection",
                 "get_active_collection",
                 "get_collection_tree",

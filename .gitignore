@@ -209,3 +209,4 @@ configs/antigravity_mcp.json
 *.xpi
 ZoteroQueue/
 zotero_read_cache/
+tmp/
